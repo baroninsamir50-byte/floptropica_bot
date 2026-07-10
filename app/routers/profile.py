@@ -1,0 +1,115 @@
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.keyboards import main_menu
+from app.services import get_character, xp_for_next
+from app.states import ChangeHousePhoto, ChangePortrait
+
+router = Router()
+
+
+async def send_profile(target: Message, session: AsyncSession, telegram_id: int) -> None:
+    c = await get_character(session, telegram_id)
+    if not c:
+        await target.answer("Сначала зарегистрируйтесь: /start")
+        return
+    text = (
+        f"👑 <b>{c.name}</b>\n"
+        f"⭐ Уровень: {c.level}\n"
+        f"✨ Опыт: {c.experience}/{xp_for_next(c.level)}\n"
+        f"❤️ Здоровье: {c.health}\n"
+        f"🔮 Мана: {c.mana}\n"
+        f"💪 Сила: {c.strength}\n"
+        f"🧠 Интеллект: {c.intelligence}\n"
+        f"🏃 Ловкость: {c.agility}\n"
+        f"🪄 Магия: {c.magic}\n"
+        f"🍀 Удача: {c.luck}\n"
+        f"🛡 Выносливость: {c.endurance}\n"
+        f"🎭 Харизма: {c.charisma}\n"
+        f"🪙 Золото: {c.gold}\n"
+        f"🧰 Профессия: {c.profession}\n"
+        f"🏷 Титул: {c.title}\n"
+        f"📣 Репутация: {c.reputation}\n"
+        f"🚩 Фракция: {c.faction}\n"
+        f"👥 Статус: {c.social_status}"
+    )
+    await target.answer_photo(c.portrait_file_id, caption=text)
+
+
+@router.message(Command("профиль", "персонаж"))
+async def profile(message: Message, session: AsyncSession) -> None:
+    await send_profile(message, session, message.from_user.id)
+
+
+@router.callback_query(F.data == "menu:profile")
+async def profile_callback(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    await send_profile(callback.message, session, callback.from_user.id)
+
+
+@router.message(Command("дом"))
+async def house(message: Message, session: AsyncSession) -> None:
+    c = await get_character(session, message.from_user.id)
+    if not c or not c.house:
+        await message.answer("Дом не найден. Используйте /start.")
+        return
+    h = c.house
+    text = (
+        f"🏰 <b>{h.name}</b>\n"
+        f"👤 Владелец: {c.name}\n"
+        f"📍 Расположение: {h.location}\n"
+        f"📖 {h.description}\n"
+        f"⭐ Уровень: {h.level}\n"
+        f"💰 Стоимость: {h.value}\n"
+        f"🛡 Защита: {h.defense}\n"
+        f"📜 Статус: {h.status}"
+    )
+    await message.answer_photo(h.image_file_id, caption=text)
+
+
+@router.callback_query(F.data == "menu:house")
+async def house_callback(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    await house(callback.message, session)
+
+
+@router.message(Command("сменить_портрет"))
+async def change_portrait(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not await get_character(session, message.from_user.id):
+        await message.answer("Сначала зарегистрируйтесь: /start")
+        return
+    await state.set_state(ChangePortrait.photo)
+    await message.answer("Пришлите новую фотографию персонажа. Она заменит предыдущую.")
+
+
+@router.message(ChangePortrait.photo, F.photo)
+async def save_portrait(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    c = await get_character(session, message.from_user.id)
+    c.portrait_file_id = message.photo[-1].file_id
+    await state.clear()
+    await message.answer("✅ Портрет персонажа обновлён.")
+
+
+@router.message(Command("сменить_фото_дома"))
+async def change_house(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if not await get_character(session, message.from_user.id):
+        await message.answer("Сначала зарегистрируйтесь: /start")
+        return
+    await state.set_state(ChangeHousePhoto.photo)
+    await message.answer("Пришлите новую фотографию дома. Она заменит предыдущую.")
+
+
+@router.message(ChangeHousePhoto.photo, F.photo)
+async def save_house(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    c = await get_character(session, message.from_user.id)
+    c.house.image_file_id = message.photo[-1].file_id
+    await state.clear()
+    await message.answer("✅ Фотография дома обновлена.")
+
+
+@router.message(Command("меню"))
+async def menu(message: Message) -> None:
+    await message.answer("Главное меню Королевства:", reply_markup=main_menu())

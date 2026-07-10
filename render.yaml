@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: floptropica-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: TIMEZONE
+        value: Europe/Amsterdam
+      - key: DATABASE_URL
+        fromDatabase:
+          name: floptropica-db
+          property: connectionString
+
+databases:
+  - name: floptropica-db
+    plan: free
+    databaseName: floptropica
+    user: floptropica
