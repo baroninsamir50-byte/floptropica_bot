@@ -233,6 +233,29 @@ async def collect_npc_income(session: AsyncSession, character: Character) -> int
 
 
 
+
+async def get_equipment_bonuses(
+    session: AsyncSession,
+    character_id: int,
+) -> dict[str, int]:
+    """Возвращает суммарные бонусы надетой экипировки персонажа."""
+    result = await session.execute(
+        select(ItemTemplate)
+        .join(InventoryItem, InventoryItem.item_id == ItemTemplate.id)
+        .where(
+            InventoryItem.character_id == character_id,
+            InventoryItem.equipped.is_(True),
+        )
+    )
+    bonuses: dict[str, int] = {}
+    for item in result.scalars():
+        if item.stat_name:
+            bonuses[item.stat_name] = (
+                bonuses.get(item.stat_name, 0) + item.stat_bonus
+            )
+    return bonuses
+
+
 async def get_effective_stats(session: AsyncSession, character: Character) -> dict[str, int]:
     bonuses = await get_equipment_bonuses(session, character.id)
     names = (
