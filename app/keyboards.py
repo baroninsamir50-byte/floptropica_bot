@@ -11,8 +11,8 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🎲 Игровая арена", callback_data="menu:games"),
         ],
         [
-            InlineKeyboardButton(text="🏋 Развитие", callback_data="menu:training"),
-            InlineKeyboardButton(text="💼 Казна", callback_data="menu:work"),
+            InlineKeyboardButton(text="🏋 Развитие", callback_data="menu:development"),
+            InlineKeyboardButton(text="💰 Казна", callback_data="menu:treasury"),
         ],
         [
             InlineKeyboardButton(text="🎒 Снаряжение", callback_data="menu:inventory"),
@@ -199,6 +199,7 @@ def repair_house_keyboard() -> InlineKeyboardMarkup:
 def admin_extended_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Настройки игроков", callback_data="admin:players")],
+        [InlineKeyboardButton(text="🖼 Изображения разделов", callback_data="admin:media")],
         [
             InlineKeyboardButton(text="🐉 Напасть на дом", callback_data="admin:attack_players"),
             InlineKeyboardButton(text="🏗 Починить все дома", callback_data="admin:repair_all"),
@@ -217,3 +218,13 @@ def admin_attack_players_keyboard(players: list[tuple[int, str]]) -> InlineKeybo
     ]
     rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_media_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛒 Фото магазина дня", callback_data="adminmedia:shop")],
+        [InlineKeyboardButton(text="💰 Фото казны", callback_data="adminmedia:treasury")],
+        [InlineKeyboardButton(text="🏋 Фото развития", callback_data="adminmedia:development")],
+        [InlineKeyboardButton(text="🚩 Фото фракций", callback_data="adminmedia:factions")],
+        [InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")],
+    ])

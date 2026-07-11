@@ -10,7 +10,7 @@ from app.keyboards import inventory_keyboard, npc_keyboard, shop_keyboard
 from app.models import InventoryItem, ItemTemplate, OwnedNpc
 from app.services import (
     buy_item, buy_npc, claim_work, collect_npc_income, get_character,
-    start_work, toggle_equip, get_daily_shop_items, local_date,
+    start_work, toggle_equip, get_daily_shop_items, get_system_media, local_date,
 )
 
 router = Router()
@@ -59,7 +59,11 @@ async def show_shop(message: Message, session: AsyncSession) -> None:
     for item in items:
         lines.append(f"• <b>{item.name}</b> — {item.price} 🪙\n  {item.rarity}. {item.description}")
     lines.append("\nАссортимент сменится на следующие сутки.")
-    await message.answer("\n".join(lines), reply_markup=shop_keyboard(rows))
+    file_id = await get_system_media(session, "shop")
+    if file_id:
+        await message.answer_photo(file_id, caption="\n".join(lines), reply_markup=shop_keyboard(rows))
+    else:
+        await message.answer("\n".join(lines), reply_markup=shop_keyboard(rows))
 
 
 @router.message(Command("магазин", "shop"))
@@ -176,3 +180,17 @@ async def npc_income(callback: CallbackQuery, session: AsyncSession) -> None:
         await callback.answer(f"Получено {amount} золота.", show_alert=True)
     except ValueError as exc:
         await callback.answer(str(exc), show_alert=True)
+
+
+@router.callback_query(F.data == "treasury:claim")
+async def treasury_claim(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    c = await get_character(session, callback.from_user.id)
+    if not c:
+        await callback.message.answer("Сначала зарегистрируйтесь: /start")
+        return
+    try:
+        gold, xp = await claim_work(session, c)
+        await callback.message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP.")
+    except ValueError as exc:
+        await callback.message.answer(str(exc))

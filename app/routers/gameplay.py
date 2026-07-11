@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.keyboards import stats_keyboard, professions_keyboard, factions_keyboard
 from app.models import User
-from app.services import apply_levels, get_character, local_date
+from app.services import apply_levels, get_character, get_system_media, local_date
 
 router = Router()
 
@@ -90,14 +90,34 @@ async def factions(message: Message, session: AsyncSession) -> None:
     if not c:
         await message.answer("Сначала зарегистрируйтесь: /start")
         return
-    await message.answer(f"Ваша фракция: {c.faction}", reply_markup=factions_keyboard())
+    text = (
+        "🚩 <b>Фракции Королевства</b>\n\n"
+        f"Ваша фракция: {c.faction}\n\n"
+        "Западная сторона — порядок, сила и контроль территорий.\n"
+        "Нейтральный Диалог — дипломатия, баланс и переговоры."
+    )
+    file_id = await get_system_media(session, "factions")
+    if file_id:
+        await message.answer_photo(file_id, caption=text, reply_markup=factions_keyboard())
+    else:
+        await message.answer(text, reply_markup=factions_keyboard())
 
 
 @router.callback_query(F.data == "menu:factions")
 async def factions_callback(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
     c = await get_character(session, callback.from_user.id)
-    await callback.message.answer(f"Ваша фракция: {c.faction}", reply_markup=factions_keyboard())
+    text = (
+        "🚩 <b>Фракции Королевства</b>\n\n"
+        f"Ваша фракция: {c.faction}\n\n"
+        "Западная сторона — порядок, сила и контроль территорий.\n"
+        "Нейтральный Диалог — дипломатия, баланс и переговоры."
+    )
+    file_id = await get_system_media(session, "factions")
+    if file_id:
+        await callback.message.answer_photo(file_id, caption=text, reply_markup=factions_keyboard())
+    else:
+        await callback.message.answer(text, reply_markup=factions_keyboard())
 
 
 @router.callback_query(F.data.startswith("faction:"))

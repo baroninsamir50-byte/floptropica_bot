@@ -14,3 +14,7 @@ class ChangePortrait(StatesGroup):
 
 class ChangeHousePhoto(StatesGroup):
     photo = State()
+
+
+class AdminMediaUpload(StatesGroup):
+    photo = State()

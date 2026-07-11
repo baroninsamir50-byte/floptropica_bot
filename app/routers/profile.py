@@ -12,6 +12,14 @@ from app.states import ChangeHousePhoto, ChangePortrait
 router = Router()
 
 
+async def send_section_card(target: Message, session: AsyncSession, key: str, caption: str, reply_markup=None) -> None:
+    file_id = await get_system_media(session, key)
+    if file_id:
+        await target.answer_photo(file_id, caption=caption, reply_markup=reply_markup)
+    else:
+        await target.answer(caption, reply_markup=reply_markup)
+
+
 async def send_profile(target: Message, session: AsyncSession, telegram_id: int) -> None:
     c = await get_character(session, telegram_id)
     if not c:
@@ -127,3 +135,40 @@ async def menu(message: Message) -> None:
         "👑 <b>Центральная панель Королевства</b>\nВыберите раздел:",
         reply_markup=main_menu(message.from_user.id in get_settings().admins),
     )
+
+
+@router.callback_query(F.data == "menu:development")
+async def development_card(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    c = await get_character(session, callback.from_user.id)
+    if not c:
+        await callback.message.answer("Сначала зарегистрируйтесь: /start")
+        return
+    from app.keyboards import stats_keyboard
+    caption = (
+        "🏋 <b>Зал развития</b>\n\n"
+        f"Герой: {c.name}\nУровень: {c.level}\n"
+        f"Опыт: {c.experience}/{xp_for_next(c.level)}\n\n"
+        "Выберите характеристику для ежедневной тренировки."
+    )
+    await send_section_card(callback.message, session, "development", caption, stats_keyboard())
+
+
+@router.callback_query(F.data == "menu:treasury")
+async def treasury_card(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    c = await get_character(session, callback.from_user.id)
+    if not c:
+        await callback.message.answer("Сначала зарегистрируйтесь: /start")
+        return
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💼 Начать работу", callback_data="menu:work")],
+        [InlineKeyboardButton(text="📦 Получить награду", callback_data="treasury:claim")],
+    ])
+    caption = (
+        "💰 <b>Королевская казна</b>\n\n"
+        f"Ваше золото: {c.gold} 🪙\nРабот сегодня: {c.work_count}/2\n\n"
+        "Здесь можно начать работу или забрать готовую награду."
+    )
+    await send_section_card(callback.message, session, "treasury", caption, keyboard)

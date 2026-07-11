@@ -46,8 +46,26 @@ async def run_bot() -> None:
     dp.include_router(common.router)
 
     await bot.delete_webhook(drop_pending_updates=False)
-    await bot.set_my_commands([BotCommand(command="menu", description="Главное меню"), BotCommand(command="profile", description="Мой персонаж"), BotCommand(command="house", description="Мой дом"), BotCommand(command="shop", description="Магазин дня"), BotCommand(command="ping", description="Проверить бота"), BotCommand(command="help", description="Помощь")])
-    await dp.start_polling(bot)
+    await bot.set_my_commands([
+        BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="profile", description="Мой персонаж"),
+        BotCommand(command="house", description="Мой дом"),
+        BotCommand(command="shop", description="Магазин дня"),
+        BotCommand(command="admin", description="Панель создателя"),
+        BotCommand(command="ping", description="Проверить бота"),
+        BotCommand(command="help", description="Помощь"),
+    ])
+
+    try:
+        await process_due_game_tasks(bot)
+    except Exception:
+        logging.exception("Failed to process overdue game tasks on startup")
+
+    scheduler_task = asyncio.create_task(house_attack_loop(bot))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        scheduler_task.cancel()
 
 
 async def main() -> None:

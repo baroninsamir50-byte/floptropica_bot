@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
-from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, OwnedNpc, User
+from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, OwnedNpc, SystemMedia, User
 
 
 def local_date() -> str:
@@ -239,3 +239,17 @@ def percent_bonus(value: int, opponent_value: int) -> int:
     if difference <= 0:
         return 0
     return min(5, max(1, difference // 3 + 1))
+
+
+async def get_system_media(session: AsyncSession, key: str) -> str | None:
+    result = await session.execute(select(SystemMedia.file_id).where(SystemMedia.key == key))
+    return result.scalar_one_or_none()
+
+
+async def set_system_media(session: AsyncSession, key: str, file_id: str) -> None:
+    result = await session.execute(select(SystemMedia).where(SystemMedia.key == key))
+    media = result.scalar_one_or_none()
+    if media:
+        media.file_id = file_id
+    else:
+        session.add(SystemMedia(key=key, file_id=file_id))
