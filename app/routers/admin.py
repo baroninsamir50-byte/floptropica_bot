@@ -34,6 +34,7 @@ ROLE_DATA = {
     "leader_neutral": ("Лидер фракции «Нейтральный Диалог»", "Нейтральный Диалог"),
     "king": ("Король", None),
     "queen": ("Королева", None),
+    "princess": ("Королевна", None),
 }
 
 MEDIA_NAMES = {
@@ -41,6 +42,7 @@ MEDIA_NAMES = {
     "treasury": "казны",
     "development": "развития",
     "factions": "фракций",
+    "map": "карты Королевства",
 }
 
 

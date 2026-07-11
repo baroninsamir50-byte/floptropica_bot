@@ -53,6 +53,7 @@ class Character(Base):
     luck: Mapped[int] = mapped_column(Integer, default=5)
     endurance: Mapped[int] = mapped_column(Integer, default=5)
     charisma: Mapped[int] = mapped_column(Integer, default=5)
+    development_points: Mapped[int] = mapped_column(Integer, default=100)
     reputation: Mapped[int] = mapped_column(Integer, default=0)
     profession: Mapped[str] = mapped_column(String(64), default="Без профессии")
     faction: Mapped[str] = mapped_column(String(64), default="Нет")
@@ -64,6 +65,7 @@ class Character(Base):
     work_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     work_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     work_reward_claimed: Mapped[bool] = mapped_column(Boolean, default=True)
+    work_profession: Mapped[str | None] = mapped_column(String(100))
 
     user: Mapped[User] = relationship(back_populates="character")
     house: Mapped["House"] = relationship(back_populates="owner", uselist=False, cascade="all, delete-orphan")

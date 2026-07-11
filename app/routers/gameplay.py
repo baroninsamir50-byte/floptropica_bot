@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.keyboards import stats_keyboard, professions_keyboard, factions_keyboard
 from app.models import User
 from app.services import apply_levels, get_character, get_system_media, local_date
+from app.work_catalog import profession_by_key, title_can_use
 
 router = Router()
 
@@ -72,15 +73,28 @@ async def professions(message: Message, session: AsyncSession) -> None:
     if not c:
         await message.answer("Сначала зарегистрируйтесь: /start")
         return
-    await message.answer(f"Текущая профессия: {c.profession}\nВыберите новую:", reply_markup=professions_keyboard())
+    await message.answer(f"Текущая профессия: {c.profession}\nВыберите новую:", reply_markup=professions_keyboard(c.title))
 
 
 @router.callback_query(F.data.startswith("profession:"))
 async def select_profession(callback: CallbackQuery, session: AsyncSession) -> None:
     c = await get_character(session, callback.from_user.id)
-    profession = callback.data.split(":", 1)[1]
-    c.profession = profession
-    await callback.message.edit_text(f"✅ Вы выбрали профессию: {profession}")
+    profession_key = callback.data.split(":", 1)[1]
+    data = profession_by_key(profession_key)
+    if not data:
+        await callback.answer("Неизвестная профессия.", show_alert=True)
+        return
+    if not title_can_use(c.title, data):
+        await callback.answer(
+            "Эта профессия недоступна для вашей текущей роли.",
+            show_alert=True,
+        )
+        return
+    profession_name = str(data["name"])
+    c.profession = profession_name
+    await callback.message.edit_text(
+        f"✅ Вы выбрали профессию: {profession_name}"
+    )
     await callback.answer()
 
 

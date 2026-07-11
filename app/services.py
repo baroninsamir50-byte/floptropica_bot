@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, OwnedNpc, SystemMedia, User
+from app.work_catalog import profession_by_name, title_can_use
 
 
 def local_date() -> str:
@@ -84,29 +85,31 @@ async def get_daily_shop_items(session: AsyncSession, count: int = 5) -> list[It
     return Random(seed).sample(items, count)
 
 
-async def start_work(character: Character) -> str:
+async def start_work(character: Character, profession: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     today = local_date()
-
     if character.work_ends_at and not character.work_reward_claimed:
         if now < character.work_ends_at:
-            remaining = character.work_ends_at - now
-            minutes = max(1, int(remaining.total_seconds() // 60))
+            minutes = max(1, int((character.work_ends_at - now).total_seconds() // 60))
             raise ValueError(f"Вы уже работаете. Осталось примерно {minutes} мин.")
-        raise ValueError("Сначала получите награду командой /работа_статус.")
-
+        raise ValueError("Сначала получите награду в Казне.")
     if character.work_count_date != today:
-        character.work_count_date = today
-        character.work_count = 0
-
+        character.work_count_date, character.work_count = today, 0
     if character.work_count >= 2:
-        raise ValueError("Сегодня вы уже работали два раза.")
-
+        raise ValueError("Сегодня вы уже отработали две смены.")
+    selected = profession or character.profession
+    profession_data = profession_by_name(selected)
+    if not profession_data:
+        raise ValueError("Сначала выберите профессию в разделе Казна.")
+    if not title_can_use(character.title, profession_data):
+        raise ValueError("Эта профессия недоступна для вашей текущей роли.")
+    character.profession = selected
+    character.work_profession = selected
     character.work_count += 1
     character.work_started_at = now
     character.work_ends_at = now + timedelta(hours=2)
     character.work_reward_claimed = False
-    return "Работа началась на 2 часа."
+    return f"Смена «{selected}» началась на 2 часа."
 
 
 async def claim_work(session: AsyncSession, character: Character) -> tuple[int, int]:
@@ -118,10 +121,19 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
         minutes = max(1, int(remaining.total_seconds() // 60))
         raise ValueError(f"Работа ещё идёт. Осталось примерно {minutes} мин.")
 
-    gold = randint(1, 5)
-    xp = randint(5, 10)
-    await change_gold(session, character, gold, "work_reward")
+    profession = character.work_profession or character.profession
+    profession_data = profession_by_name(profession)
+    if profession_data:
+        gold_range = profession_data["gold"]
+        xp_range = profession_data["xp"]
+        bonus_stat = profession_data.get("bonus_stat")
+    else:
+        gold_range, xp_range, bonus_stat = (1, 5), (5, 10), None
+    gold, xp = randint(*gold_range), randint(*xp_range)
+    await change_gold(session, character, gold, f"work_reward:{profession}")
     character.experience += xp
+    if bonus_stat and randint(1, 100) <= 20:
+        setattr(character, bonus_stat, getattr(character, bonus_stat) + 1)
     character.work_reward_claimed = True
     apply_levels(character)
     return gold, xp

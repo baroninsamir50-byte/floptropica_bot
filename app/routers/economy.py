@@ -22,7 +22,7 @@ async def show_work(message: Message, session: AsyncSession, telegram_id: int) -
         await message.answer("Сначала зарегистрируйтесь: /start")
         return
     try:
-        text = await start_work(c)
+        text = await start_work(c, c.profession)
         await message.answer(f"💼 {text}\nНаграда: 1–5 золота и 5–10 XP.")
     except ValueError as exc:
         await message.answer(str(exc))
@@ -194,3 +194,27 @@ async def treasury_claim(callback: CallbackQuery, session: AsyncSession) -> None
         await callback.message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP.")
     except ValueError as exc:
         await callback.message.answer(str(exc))
+
+
+
+@router.callback_query(F.data == "treasury:start")
+async def treasury_start(callback: CallbackQuery, session: AsyncSession) -> None:
+    await callback.answer()
+    c = await get_character(session, callback.from_user.id)
+    if not c: return await callback.message.answer("Сначала /start")
+    try:
+        await callback.message.answer("💼 " + await start_work(c, c.profession))
+    except ValueError as exc:
+        await callback.message.answer(str(exc))
+
+
+@router.callback_query(F.data == "treasury:professions")
+async def treasury_professions(callback: CallbackQuery, session: AsyncSession) -> None:
+    from app.keyboards import professions_keyboard
+    await callback.answer()
+    c = await get_character(session, callback.from_user.id)
+    if not c: return await callback.message.answer("Сначала /start")
+    await callback.message.answer(
+        f"🧰 Текущая профессия: <b>{c.profession}</b>",
+        reply_markup=professions_keyboard(c.title),
+    )

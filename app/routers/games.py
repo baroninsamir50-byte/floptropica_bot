@@ -74,6 +74,7 @@ async def duel_text(session: AsyncSession, duel: Duel, a: Character, b: Characte
 
 
 @router.message(Command("games", "игры"))
+@router.message(F.text.regexp(r"^/(games|игры)(?:@\\w+)?$"))
 async def games(message: Message):
     await message.answer(
         "🎲 <b>Игровая арена Флоптропики</b>\n\n"
@@ -117,6 +118,7 @@ async def duel_help(callback: CallbackQuery):
 
 
 @router.message(Command("duel", "дуэль"))
+@router.message(F.text.regexp(r"^/(duel|дуэль)(?:@\\w+)?(?:\\s+@?\\w+)?$"))
 async def duel_create(message: Message, session: AsyncSession):
     challenger = await get_character(session, message.from_user.id)
     if not challenger:
@@ -364,6 +366,7 @@ async def create_exp_common(message, user_id, session):
 
 
 @router.message(Command("expedition", "экспедиция"))
+@router.message(F.text.regexp(r"^/(expedition|экспедиция)(?:@\\w+)?$"))
 async def exp_create(message: Message, session: AsyncSession):
     await create_exp_common(message, message.from_user.id, session)
 

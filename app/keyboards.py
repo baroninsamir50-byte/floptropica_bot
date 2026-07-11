@@ -1,27 +1,19 @@
+from app.work_catalog import available_professions
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [
-            InlineKeyboardButton(text="👤 Герой", callback_data="menu:profile"),
-            InlineKeyboardButton(text="🏰 Владение", callback_data="menu:house"),
-        ],
-        [
-            InlineKeyboardButton(text="🎲 Игровая арена", callback_data="menu:games"),
-        ],
-        [
-            InlineKeyboardButton(text="🏋 Развитие", callback_data="menu:development"),
-            InlineKeyboardButton(text="💰 Казна", callback_data="menu:treasury"),
-        ],
-        [
-            InlineKeyboardButton(text="🎒 Снаряжение", callback_data="menu:inventory"),
-            InlineKeyboardButton(text="🛒 Магазин дня", callback_data="menu:shop"),
-        ],
-        [
-            InlineKeyboardButton(text="🚩 Фракции", callback_data="menu:factions"),
-            InlineKeyboardButton(text="🛡 Защита дома", callback_data="house:defense"),
-        ],
+        [InlineKeyboardButton(text="👤 Герой", callback_data="menu:profile"),
+         InlineKeyboardButton(text="🏰 Владение", callback_data="menu:house")],
+        [InlineKeyboardButton(text="🗺 Карта Королевства", callback_data="menu:map")],
+        [InlineKeyboardButton(text="🎲 Игровая арена", callback_data="menu:games")],
+        [InlineKeyboardButton(text="🏋 Развитие", callback_data="menu:development"),
+         InlineKeyboardButton(text="💰 Казна", callback_data="menu:treasury")],
+        [InlineKeyboardButton(text="🎒 Снаряжение", callback_data="menu:inventory"),
+         InlineKeyboardButton(text="🛒 Магазин дня", callback_data="menu:shop")],
+        [InlineKeyboardButton(text="🚩 Фракции", callback_data="menu:factions"),
+         InlineKeyboardButton(text="🛡 Защита дома", callback_data="house:defense")],
     ]
     if is_admin:
         rows.append([InlineKeyboardButton(text="⚙ Панель создателя", callback_data="admin:home")])
@@ -60,11 +52,15 @@ def inventory_keyboard(items: list[tuple[int, str, bool, str | None]]) -> Inline
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def professions_keyboard() -> InlineKeyboardMarkup:
-    professions = ["Маг", "Рыцарь", "Алхимик", "Шахтёр", "Кузнец", "Торговец", "Охотник", "Учёный", "Строитель", "Певица"]
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=p, callback_data=f"profession:{p}")] for p in professions
-    ])
+def professions_keyboard(title: str = "") -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=str(data["label"]),
+            callback_data=f"profession:{key}",
+        )]
+        for key, data in available_professions(title)
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def factions_keyboard() -> InlineKeyboardMarkup:
@@ -92,7 +88,7 @@ def admin_players_keyboard(players: list[tuple[int,str,str]]) -> InlineKeyboardM
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_roles_keyboard(tid: int) -> InlineKeyboardMarkup:
-    roles=[("👤 Гражданин","citizen"),("🌅 Лидер Запада","leader_west"),("🕊 Лидер Диалога","leader_neutral"),("👑 Король","king"),("👑 Королева","queen")]
+    roles=[("👤 Гражданин","citizen"),("🌅 Лидер Запада","leader_west"),("🕊 Лидер Диалога","leader_neutral"),("👑 Король","king"),("👑 Королева","queen"),("👸 Королевна","princess")]
     rows=[[InlineKeyboardButton(text=label, callback_data=f"setrole:{tid}:{key}")] for label,key in roles]
     rows.append([InlineKeyboardButton(text="⬅ К игрокам", callback_data="admin:players")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -226,5 +222,32 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💰 Фото казны", callback_data="adminmedia:treasury")],
         [InlineKeyboardButton(text="🏋 Фото развития", callback_data="adminmedia:development")],
         [InlineKeyboardButton(text="🚩 Фото фракций", callback_data="adminmedia:factions")],
+        [InlineKeyboardButton(text="🗺 Карта Королевства", callback_data="adminmedia:map")],
         [InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")],
+    ])
+
+
+
+def development_keyboard() -> InlineKeyboardMarkup:
+    stats = [
+        ("💪 Сила", "strength"), ("🧠 Интеллект", "intelligence"),
+        ("🏃 Ловкость", "agility"), ("✨ Магия", "magic"),
+        ("🍀 Удача", "luck"), ("🛡 Выносливость", "endurance"),
+        ("🎭 Харизма", "charisma"), ("❤️ Здоровье", "health"),
+        ("🔮 Мана", "mana"),
+    ]
+    rows = []
+    for label, key in stats:
+        rows.append([
+            InlineKeyboardButton(text=f"{label} +1", callback_data=f"dev:{key}:1"),
+            InlineKeyboardButton(text="+5", callback_data=f"dev:{key}:5"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def treasury_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧰 Выбрать профессию", callback_data="treasury:professions")],
+        [InlineKeyboardButton(text="💼 Начать смену", callback_data="treasury:start")],
+        [InlineKeyboardButton(text="📦 Получить награду", callback_data="treasury:claim")],
     ])

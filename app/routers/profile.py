@@ -3,172 +3,116 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import get_settings
-from app.keyboards import house_panel_keyboard, main_menu
-from app.services import get_character, xp_for_next
+from app.keyboards import development_keyboard, house_panel_keyboard, main_menu, treasury_keyboard
+from app.services import get_character, get_equipment_bonuses, get_system_media, xp_for_next
 from app.states import ChangeHousePhoto, ChangePortrait
-
 router = Router()
 
-
-async def send_section_card(target: Message, session: AsyncSession, key: str, caption: str, reply_markup=None) -> None:
+async def section(target, session, key, caption, keyboard=None):
     file_id = await get_system_media(session, key)
-    if file_id:
-        await target.answer_photo(file_id, caption=caption, reply_markup=reply_markup)
-    else:
-        await target.answer(caption, reply_markup=reply_markup)
+    if file_id: await target.answer_photo(file_id, caption=caption, reply_markup=keyboard)
+    else: await target.answer(caption, reply_markup=keyboard)
 
-
-async def send_profile(target: Message, session: AsyncSession, telegram_id: int) -> None:
-    c = await get_character(session, telegram_id)
-    if not c:
-        await target.answer("Сначала зарегистрируйтесь: /start")
-        return
-    text = (
-        f"👑 <b>{c.name}</b>\n"
-        f"⭐ Уровень: {c.level}\n"
-        f"✨ Опыт: {c.experience}/{xp_for_next(c.level)}\n"
-        f"❤️ Здоровье: {c.health}\n"
-        f"🔮 Мана: {c.mana}\n"
-        f"💪 Сила: {c.strength}\n"
-        f"🧠 Интеллект: {c.intelligence}\n"
-        f"🏃 Ловкость: {c.agility}\n"
-        f"🪄 Магия: {c.magic}\n"
-        f"🍀 Удача: {c.luck}\n"
-        f"🛡 Выносливость: {c.endurance}\n"
-        f"🎭 Харизма: {c.charisma}\n"
-        f"🪙 Золото: {c.gold}\n"
-        f"🧰 Профессия: {c.profession}\n"
-        f"🏷 Титул: {c.title}\n"
-        f"📣 Репутация: {c.reputation}\n"
-        f"🚩 Фракция: {c.faction}\n"
-        f"👥 Статус: {c.social_status}"
-    )
-    await target.answer_photo(c.portrait_file_id, caption=text)
-
-
-@router.message(Command("профиль", "персонаж", "profile", "character"))
-async def profile(message: Message, session: AsyncSession) -> None:
-    await send_profile(message, session, message.from_user.id)
-
-
-@router.callback_query(F.data == "menu:profile")
-async def profile_callback(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
-    await send_profile(callback.message, session, callback.from_user.id)
-
-
-@router.message(Command("дом", "house"))
-async def house(message: Message, session: AsyncSession) -> None:
-    c = await get_character(session, message.from_user.id)
-    if not c or not c.house:
-        await message.answer("Дом не найден. Используйте /start.")
-        return
-    h = c.house
-    text = (
-        f"🏰 <b>{h.name}</b>\n"
-        f"👤 Владелец: {c.name}\n"
-        f"📍 Расположение: {h.location}\n"
-        f"📖 {h.description}\n"
-        f"⭐ Уровень: {h.level}\n"
-        f"💰 Стоимость: {h.value}\n"
-        f"🛡 Защита: {h.defense}\n"
-        f"📜 Статус: {h.status}\n"
-        f"🏗 Прочность: {h.integrity}/100\n"
-        f"✨ Энергия ремонта: {h.repair_energy}"
-    )
-    await message.answer_photo(h.image_file_id, caption=text)
-
-
-@router.callback_query(F.data == "menu:house")
-async def house_callback(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
-    c = await get_character(session, callback.from_user.id)
-    if not c or not c.house:
-        await callback.message.answer("Дом не найден. Сначала /start в личном чате.")
-        return
-    h = c.house
-    text = (f"🏰 <b>{h.name}</b>\n👤 Владелец: {c.name}\n📍 Расположение: {h.location}\n"
-            f"📖 {h.description}\n⭐ Уровень: {h.level}\n💰 Стоимость: {h.value}\n"
-            f"🛡 Защита: {h.defense}\n📜 Статус: {h.status}")
-    await callback.message.answer_photo(h.image_file_id, caption=text)
-
-
-@router.message(Command("сменить_портрет"))
-async def change_portrait(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    if not await get_character(session, message.from_user.id):
-        await message.answer("Сначала зарегистрируйтесь: /start")
-        return
-    await state.set_state(ChangePortrait.photo)
-    await message.answer("Пришлите новую фотографию персонажа. Она заменит предыдущую.")
-
-
-@router.message(ChangePortrait.photo, F.photo)
-async def save_portrait(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    c = await get_character(session, message.from_user.id)
-    c.portrait_file_id = message.photo[-1].file_id
-    await state.clear()
-    await message.answer("✅ Портрет персонажа обновлён.")
-
-
-@router.message(Command("сменить_фото_дома"))
-async def change_house(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    if not await get_character(session, message.from_user.id):
-        await message.answer("Сначала зарегистрируйтесь: /start")
-        return
-    await state.set_state(ChangeHousePhoto.photo)
-    await message.answer("Пришлите новую фотографию дома. Она заменит предыдущую.")
-
-
-@router.message(ChangeHousePhoto.photo, F.photo)
-async def save_house(message: Message, state: FSMContext, session: AsyncSession) -> None:
-    c = await get_character(session, message.from_user.id)
-    c.house.image_file_id = message.photo[-1].file_id
-    await state.clear()
-    await message.answer("✅ Фотография дома обновлена.")
-
-
-@router.message(Command("меню", "menu"))
-async def menu(message: Message) -> None:
-    await message.answer(
-        "👑 <b>Центральная панель Королевства</b>\nВыберите раздел:",
-        reply_markup=main_menu(message.from_user.id in get_settings().admins),
+async def hero_caption(session, c):
+    bonuses = await get_equipment_bonuses(session, c.id)
+    total=lambda k: getattr(c,k)+bonuses.get(k,0)
+    return (
+        f"👑 <b>{c.name}</b>\n⭐ Уровень: {c.level}\n✨ Опыт: {c.experience}/{xp_for_next(c.level)}\n"
+        f"🎯 Свободные очки развития: {c.development_points}/100\n\n"
+        f"❤️ Здоровье: {total('health')}\n🔮 Мана: {total('mana')}\n💪 Сила: {total('strength')}\n"
+        f"🧠 Интеллект: {total('intelligence')}\n🏃 Ловкость: {total('agility')}\n"
+        f"🪄 Магия: {total('magic')}\n🍀 Удача: {total('luck')}\n"
+        f"🛡 Выносливость: {total('endurance')}\n🎭 Харизма: {total('charisma')}\n\n"
+        f"🪙 Золото: {c.gold}\n🧰 Профессия: {c.profession}\n🏷 Роль: {c.title}\n"
+        f"📣 Репутация: {c.reputation}\n🚩 Фракция: {c.faction}\n👥 Статус: {c.social_status}"
     )
 
+async def send_profile(target, session, tid):
+    c=await get_character(session,tid)
+    if not c: return await target.answer("Сначала зарегистрируйтесь: /start")
+    await target.answer_photo(c.portrait_file_id,caption=await hero_caption(session,c))
 
-@router.callback_query(F.data == "menu:development")
-async def development_card(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
-    c = await get_character(session, callback.from_user.id)
-    if not c:
-        await callback.message.answer("Сначала зарегистрируйтесь: /start")
-        return
-    from app.keyboards import stats_keyboard
-    caption = (
-        "🏋 <b>Зал развития</b>\n\n"
-        f"Герой: {c.name}\nУровень: {c.level}\n"
-        f"Опыт: {c.experience}/{xp_for_next(c.level)}\n\n"
-        "Выберите характеристику для ежедневной тренировки."
-    )
-    await send_section_card(callback.message, session, "development", caption, stats_keyboard())
+@router.message(Command("profile","character","профиль","персонаж"))
+async def profile(message:Message,session:AsyncSession): await send_profile(message,session,message.from_user.id)
+@router.callback_query(F.data=="menu:profile")
+async def profile_cb(callback:CallbackQuery,session:AsyncSession):
+    await callback.answer(); await send_profile(callback.message,session,callback.from_user.id)
 
+async def send_house(target,session,tid):
+    c=await get_character(session,tid)
+    if not c or not c.house: return await target.answer("Дом не найден. Используйте /start.")
+    h=c.house
+    caption=(f"🏰 <b>{h.name}</b>\n👤 Владелец: {c.name}\n📍 {h.location}\n📖 {h.description}\n"
+             f"⭐ Уровень: {h.level}\n💰 Стоимость: {h.value}\n🛡 Защита: {h.defense}\n"
+             f"🏗 Прочность: {h.integrity}/100\n✨ Энергия ремонта: {h.repair_energy}")
+    await target.answer_photo(h.image_file_id,caption=caption,reply_markup=house_panel_keyboard())
+@router.message(Command("house","дом"))
+async def house(message:Message,session:AsyncSession): await send_house(message,session,message.from_user.id)
+@router.callback_query(F.data=="menu:house")
+async def house_cb(callback:CallbackQuery,session:AsyncSession):
+    await callback.answer(); await send_house(callback.message,session,callback.from_user.id)
 
-@router.callback_query(F.data == "menu:treasury")
-async def treasury_card(callback: CallbackQuery, session: AsyncSession) -> None:
-    await callback.answer()
-    c = await get_character(session, callback.from_user.id)
-    if not c:
-        await callback.message.answer("Сначала зарегистрируйтесь: /start")
-        return
-    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💼 Начать работу", callback_data="menu:work")],
-        [InlineKeyboardButton(text="📦 Получить награду", callback_data="treasury:claim")],
-    ])
-    caption = (
-        "💰 <b>Королевская казна</b>\n\n"
-        f"Ваше золото: {c.gold} 🪙\nРабот сегодня: {c.work_count}/2\n\n"
-        "Здесь можно начать работу или забрать готовую награду."
-    )
-    await send_section_card(callback.message, session, "treasury", caption, keyboard)
+@router.message(Command("change_portrait","сменить_портрет"))
+async def change_portrait(message:Message,state:FSMContext,session:AsyncSession):
+    if message.chat.type!="private": return await message.answer("Портрет меняется только в личном чате.")
+    if not await get_character(session,message.from_user.id): return await message.answer("Сначала /start")
+    await state.set_state(ChangePortrait.photo); await message.answer("Пришлите новую фотографию персонажа.")
+@router.message(ChangePortrait.photo,F.photo)
+async def save_portrait(message:Message,state:FSMContext,session:AsyncSession):
+    c=await get_character(session,message.from_user.id); c.portrait_file_id=message.photo[-1].file_id
+    await state.clear(); await message.answer("✅ Портрет обновлён.")
+
+@router.message(Command("change_house_photo","сменить_фото_дома"))
+async def change_house(message:Message,state:FSMContext,session:AsyncSession):
+    if message.chat.type!="private": return await message.answer("Фото дома меняется только в личном чате.")
+    if not await get_character(session,message.from_user.id): return await message.answer("Сначала /start")
+    await state.set_state(ChangeHousePhoto.photo); await message.answer("Пришлите новую фотографию дома.")
+@router.message(ChangeHousePhoto.photo,F.photo)
+async def save_house(message:Message,state:FSMContext,session:AsyncSession):
+    c=await get_character(session,message.from_user.id); c.house.image_file_id=message.photo[-1].file_id
+    await state.clear(); await message.answer("✅ Фото дома обновлено.")
+
+@router.message(Command("menu","меню"))
+async def menu(message:Message):
+    await message.answer("👑 <b>Центральная панель Королевства</b>",reply_markup=main_menu(message.from_user.id in get_settings().admins))
+
+@router.callback_query(F.data=="menu:development")
+async def development(callback:CallbackQuery,session:AsyncSession):
+    await callback.answer(); c=await get_character(session,callback.from_user.id)
+    if not c: return await callback.message.answer("Сначала /start")
+    await section(callback.message,session,"development",
+        f"🏋 <b>Развитие</b>\n\nОсталось очков: <b>{c.development_points}</b> из 100\n"
+        "Очки выдаются один раз и навсегда повышают выбранные показатели.",development_keyboard())
+
+@router.callback_query(F.data.startswith("dev:"))
+async def allocate(callback:CallbackQuery,session:AsyncSession):
+    c=await get_character(session,callback.from_user.id)
+    if not c: return await callback.answer("Сначала /start",show_alert=True)
+    _,stat,raw=callback.data.split(":",2); amount=int(raw)
+    names={"strength":"Сила","intelligence":"Интеллект","agility":"Ловкость","magic":"Магия",
+           "luck":"Удача","endurance":"Выносливость","charisma":"Харизма","health":"Здоровье","mana":"Мана"}
+    if stat not in names: return await callback.answer("Ошибка.",show_alert=True)
+    if c.development_points<amount: return await callback.answer("Недостаточно очков.",show_alert=True)
+    c.development_points-=amount; setattr(c,stat,getattr(c,stat)+amount)
+    await callback.answer(f"{names[stat]} +{amount}. Осталось {c.development_points}.",show_alert=True)
+
+@router.callback_query(F.data=="menu:treasury")
+async def treasury(callback:CallbackQuery,session:AsyncSession):
+    await callback.answer(); c=await get_character(session,callback.from_user.id)
+    if not c: return await callback.message.answer("Сначала /start")
+    await section(callback.message,session,"treasury",
+        f"💰 <b>Казна и работа</b>\n\nЗолото: {c.gold} 🪙\nПрофессия: {c.profession}\n"
+        f"Смен сегодня: {c.work_count}/2\n\nВыберите профессию и начните двухчасовую смену.",treasury_keyboard())
+
+@router.callback_query(F.data=="menu:map")
+async def map_cb(callback:CallbackQuery,session:AsyncSession):
+    await callback.answer(); file_id=await get_system_media(session,"map")
+    caption="🗺 <b>Карта Королевства Флоптропика</b>"
+    if file_id: await callback.message.answer_photo(file_id,caption=caption)
+    else: await callback.message.answer(caption+"\nКарта ещё не загружена создателем.")
+@router.message(Command("map","карта"))
+async def map_cmd(message:Message,session:AsyncSession):
+    file_id=await get_system_media(session,"map"); caption="🗺 <b>Карта Королевства Флоптропика</b>"
+    if file_id: await message.answer_photo(file_id,caption=caption)
+    else: await message.answer(caption+"\nКарта ещё не загружена создателем.")
