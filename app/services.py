@@ -1,10 +1,12 @@
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
-from random import randint
+from random import Random, randint
+import hashlib
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, OwnedNpc, User
@@ -31,7 +33,7 @@ def apply_levels(character: Character) -> int:
 
 async def get_character(session: AsyncSession, telegram_id: int) -> Character | None:
     result = await session.execute(
-        select(Character).join(User).where(User.telegram_id == telegram_id)
+        select(Character).join(User).options(selectinload(Character.house)).where(User.telegram_id == telegram_id)
     )
     return result.scalar_one_or_none()
 
@@ -44,18 +46,42 @@ async def change_gold(session: AsyncSession, character: Character, amount: int, 
 
 
 async def seed_items(session: AsyncSession) -> None:
-    existing = await session.scalar(select(ItemTemplate.id).limit(1))
-    if existing:
-        return
-    templates = [
-        ItemTemplate(slug="iron_sword", name="Железный меч", description="+2 к силе", price=20, slot="weapon", rarity="Обычный", stat_name="strength", stat_bonus=2),
-        ItemTemplate(slug="royal_armor", name="Королевская броня", description="+3 к выносливости", price=35, slot="armor", rarity="Необычный", stat_name="endurance", stat_bonus=3),
-        ItemTemplate(slug="moon_amulet", name="Лунный амулет", description="+2 к магии", price=30, slot="amulet", rarity="Редкий", stat_name="magic", stat_bonus=2),
-        ItemTemplate(slug="fox_pet", name="Лис Флоппи", description="+2 к удаче", price=40, slot="pet", rarity="Редкий", stat_name="luck", stat_bonus=2),
-        ItemTemplate(slug="healing_potion", name="Зелье здоровья", description="Восстанавливает здоровье (расходник будет расширен позже)", price=8, slot=None, rarity="Обычный"),
+    catalog = [
+        ("iron_sword", "Железный меч", "+2 к силе", 20, "weapon", "Обычный", "strength", 2),
+        ("knight_blade", "Клинок рыцаря", "+4 к силе", 45, "weapon", "Необычный", "strength", 4),
+        ("mage_staff", "Посох мага", "+5 к магии", 60, "weapon", "Редкий", "magic", 5),
+        ("leather_armor", "Кожаная броня", "+2 к выносливости", 24, "armor", "Обычный", "endurance", 2),
+        ("royal_armor", "Королевская броня", "+4 к выносливости", 50, "armor", "Необычный", "endurance", 4),
+        ("dragon_armor", "Броня драконьей чешуи", "+7 к выносливости", 95, "armor", "Эпический", "endurance", 7),
+        ("moon_amulet", "Лунный амулет", "+3 к магии", 35, "amulet", "Редкий", "magic", 3),
+        ("luck_amulet", "Амулет удачи", "+4 к удаче", 42, "amulet", "Редкий", "luck", 4),
+        ("heart_amulet", "Амулет живого сердца", "+15 к здоровью", 55, "amulet", "Эпический", "health", 15),
+        ("fox_pet", "Лис Флоппи", "+2 к удаче", 40, "pet", "Редкий", "luck", 2),
+        ("owl_pet", "Королевская сова", "+3 к интеллекту", 48, "pet", "Редкий", "intelligence", 3),
+        ("guardian_cat", "Кот-страж", "+3 к выносливости", 52, "pet", "Эпический", "endurance", 3),
+        ("healing_potion", "Зелье здоровья", "+10 к запасу здоровья", 8, None, "Обычный", "health", 10),
+        ("greater_healing_potion", "Большое зелье здоровья", "+25 к запасу здоровья", 18, None, "Необычный", "health", 25),
+        ("mana_crystal", "Кристалл маны", "+15 к запасу маны", 16, None, "Необычный", "mana", 15),
     ]
-    session.add_all(templates)
+    result = await session.execute(select(ItemTemplate))
+    existing = {x.slug: x for x in result.scalars().all()}
+    for slug,name,description,price,slot,rarity,stat_name,stat_bonus in catalog:
+        item = existing.get(slug)
+        values = dict(name=name, description=description, price=price, slot=slot, rarity=rarity, stat_name=stat_name, stat_bonus=stat_bonus)
+        if item:
+            for k,v in values.items(): setattr(item,k,v)
+        else:
+            session.add(ItemTemplate(slug=slug, **values))
     await session.commit()
+
+
+async def get_daily_shop_items(session: AsyncSession, count: int = 5) -> list[ItemTemplate]:
+    result = await session.execute(select(ItemTemplate).order_by(ItemTemplate.slug))
+    items = list(result.scalars().all())
+    if len(items) <= count:
+        return items
+    seed = int.from_bytes(hashlib.sha256(local_date().encode()).digest()[:8], "big")
+    return Random(seed).sample(items, count)
 
 
 async def start_work(character: Character) -> str:
@@ -105,6 +131,9 @@ async def buy_item(session: AsyncSession, character: Character, item_id: int) ->
     item = await session.get(ItemTemplate, item_id)
     if not item:
         raise ValueError("Предмет не найден.")
+    daily_items = await get_daily_shop_items(session)
+    if item.id not in {x.id for x in daily_items}:
+        raise ValueError("Сегодня этого предмета уже нет в магазине.")
     await change_gold(session, character, -item.price, f"buy:{item.slug}")
 
     result = await session.execute(

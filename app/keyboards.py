@@ -75,3 +75,18 @@ def npc_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Купить стражника — 160 🪙", callback_data="npcbuy:guard")],
         [InlineKeyboardButton(text="Собрать доход крестьян", callback_data="npcincome")],
     ])
+
+
+def admin_main_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👥 Настройки игроков", callback_data="admin:players")]])
+
+def admin_players_keyboard(players: list[tuple[int,str,str]]) -> InlineKeyboardMarkup:
+    rows=[[InlineKeyboardButton(text=f"{name} — {title}", callback_data=f"adminplayer:{tid}")] for tid,name,title in players]
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+def admin_roles_keyboard(tid: int) -> InlineKeyboardMarkup:
+    roles=[("👤 Гражданин","citizen"),("🌅 Лидер Запада","leader_west"),("🕊 Лидер Диалога","leader_neutral"),("👑 Король","king"),("👑 Королева","queen")]
+    rows=[[InlineKeyboardButton(text=label, callback_data=f"setrole:{tid}:{key}")] for label,key in roles]
+    rows.append([InlineKeyboardButton(text="⬅ К игрокам", callback_data="admin:players")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

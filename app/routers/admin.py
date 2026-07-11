@@ -1,93 +1,59 @@
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import get_settings
+from app.keyboards import admin_main_keyboard, admin_players_keyboard, admin_roles_keyboard
 from app.models import Character, GameEvent, User
-from app.services import apply_levels, change_gold
-
+from app.services import apply_levels, change_gold, get_character
 router = Router()
-
-
-def is_admin(user_id: int) -> bool:
-    return user_id in get_settings().admins
-
-
+ROLES={"citizen":("Гражданин",None),"leader_west":("Лидер фракции «Западная сторона»","Западная сторона"),"leader_neutral":("Лидер фракции «Нейтральный Диалог»","Нейтральный Диалог"),"king":("Король",None),"queen":("Королева",None)}
+def is_admin(uid:int)->bool: return uid in get_settings().admins
 @router.message(Command("admin"))
-async def admin(message: Message) -> None:
-    if not is_admin(message.from_user.id):
-        await message.answer("Недостаточно прав.")
-        return
-    await message.answer(
-        "⚙ <b>Админ-панель</b>\n\n"
-        "/дать_золото TELEGRAM_ID AMOUNT\n"
-        "/дать_опыт TELEGRAM_ID AMOUNT\n"
-        "/запустить_событие ТЕКСТ"
-    )
-
-
-async def find_character(session: AsyncSession, telegram_id: int) -> Character | None:
-    result = await session.execute(
-        select(Character).join(User).where(User.telegram_id == telegram_id)
-    )
-    return result.scalar_one_or_none()
-
-
+async def admin(message:Message):
+    if not is_admin(message.from_user.id): return await message.answer("Недостаточно прав.")
+    await message.answer("⚙ <b>Админ-панель</b>", reply_markup=admin_main_keyboard())
+@router.callback_query(F.data=="admin:home")
+async def home(c:CallbackQuery):
+    if not is_admin(c.from_user.id): return await c.answer("Нет прав",show_alert=True)
+    await c.answer(); await c.message.edit_text("⚙ <b>Админ-панель</b>",reply_markup=admin_main_keyboard())
+@router.callback_query(F.data=="admin:players")
+async def players(c:CallbackQuery,session:AsyncSession):
+    if not is_admin(c.from_user.id): return await c.answer("Нет прав",show_alert=True)
+    result=await session.execute(select(User.telegram_id,Character.name,Character.title).join(Character,Character.user_id==User.id).order_by(Character.name))
+    rows=list(result.all()); await c.answer()
+    await c.message.edit_text("👥 <b>Выберите игрока</b>",reply_markup=admin_players_keyboard(rows))
+@router.callback_query(F.data.startswith("adminplayer:"))
+async def player(c:CallbackQuery,session:AsyncSession):
+    if not is_admin(c.from_user.id): return await c.answer("Нет прав",show_alert=True)
+    tid=int(c.data.split(":")[1]); ch=await get_character(session,tid)
+    if not ch: return await c.answer("Игрок не найден",show_alert=True)
+    await c.answer(); await c.message.edit_text(f"👤 <b>{ch.name}</b>\nРоль: {ch.title}\nФракция: {ch.faction}",reply_markup=admin_roles_keyboard(tid))
+@router.callback_query(F.data.startswith("setrole:"))
+async def setrole(c:CallbackQuery,session:AsyncSession):
+    if not is_admin(c.from_user.id): return await c.answer("Нет прав",show_alert=True)
+    _,tid,key=c.data.split(":",2); ch=await get_character(session,int(tid)); title,faction=ROLES[key]
+    ch.title=title
+    if key=="citizen": ch.faction="Нет"
+    elif faction: ch.faction=faction
+    await c.answer("Роль назначена",show_alert=True)
+    await c.message.edit_text(f"✅ {ch.name}: <b>{title}</b>\nФракция: {ch.faction}",reply_markup=admin_roles_keyboard(int(tid)))
+async def find_character(session,tid):
+    r=await session.execute(select(Character).join(User).where(User.telegram_id==tid)); return r.scalar_one_or_none()
 @router.message(Command("дать_золото"))
-async def give_gold(message: Message, session: AsyncSession) -> None:
-    if not is_admin(message.from_user.id):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 3:
-        await message.answer("Формат: /дать_золото TELEGRAM_ID AMOUNT")
-        return
-    try:
-        telegram_id, amount = int(parts[1]), int(parts[2])
-    except ValueError:
-        await message.answer("ID и сумма должны быть числами.")
-        return
-    c = await find_character(session, telegram_id)
-    if not c:
-        await message.answer("Игрок не найден.")
-        return
-    try:
-        await change_gold(session, c, amount, f"admin:{message.from_user.id}")
-        await message.answer(f"Готово. Баланс игрока: {c.gold}")
-    except ValueError as exc:
-        await message.answer(str(exc))
-
-
+async def give_gold(message:Message,session:AsyncSession):
+    if not is_admin(message.from_user.id): return
+    try: _,tid,amount=message.text.split(); ch=await find_character(session,int(tid)); await change_gold(session,ch,int(amount),f"admin:{message.from_user.id}"); await message.answer(f"Баланс: {ch.gold}")
+    except Exception as e: await message.answer(f"Формат: /дать_золото ID СУММА\n{e}")
 @router.message(Command("дать_опыт"))
-async def give_xp(message: Message, session: AsyncSession) -> None:
-    if not is_admin(message.from_user.id):
-        return
-    parts = (message.text or "").split()
-    if len(parts) != 3:
-        await message.answer("Формат: /дать_опыт TELEGRAM_ID AMOUNT")
-        return
-    try:
-        telegram_id, amount = int(parts[1]), int(parts[2])
-    except ValueError:
-        await message.answer("ID и опыт должны быть числами.")
-        return
-    c = await find_character(session, telegram_id)
-    if not c:
-        await message.answer("Игрок не найден.")
-        return
-    c.experience += max(0, amount)
-    levels = apply_levels(c)
-    await message.answer(f"Готово. Уровень: {c.level}. Повышений: {levels}.")
-
-
+async def give_xp(message:Message,session:AsyncSession):
+    if not is_admin(message.from_user.id): return
+    try: _,tid,amount=message.text.split(); ch=await find_character(session,int(tid)); ch.experience+=max(0,int(amount)); apply_levels(ch); await message.answer(f"Уровень: {ch.level}")
+    except Exception as e: await message.answer(f"Формат: /дать_опыт ID ОПЫТ\n{e}")
 @router.message(Command("запустить_событие"))
-async def launch_event(message: Message, session: AsyncSession) -> None:
-    if not is_admin(message.from_user.id):
-        return
-    title = (message.text or "").partition(" ")[2].strip()
-    if not title:
-        await message.answer("Формат: /запустить_событие ТЕКСТ")
-        return
-    session.add(GameEvent(title=title))
-    await message.answer(f"⚠ Событие запущено:\n\n{title}")
+async def event(message:Message,session:AsyncSession):
+    if not is_admin(message.from_user.id): return
+    title=message.text.partition(" ")[2].strip()
+    if not title: return await message.answer("Формат: /запустить_событие ТЕКСТ")
+    session.add(GameEvent(title=title)); await message.answer(f"⚠ Событие: {title}")

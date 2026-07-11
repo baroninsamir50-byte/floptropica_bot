@@ -39,7 +39,7 @@ async def send_profile(target: Message, session: AsyncSession, telegram_id: int)
     await target.answer_photo(c.portrait_file_id, caption=text)
 
 
-@router.message(Command("профиль", "персонаж"))
+@router.message(Command("профиль", "персонаж", "profile", "character"))
 async def profile(message: Message, session: AsyncSession) -> None:
     await send_profile(message, session, message.from_user.id)
 
@@ -50,7 +50,7 @@ async def profile_callback(callback: CallbackQuery, session: AsyncSession) -> No
     await send_profile(callback.message, session, callback.from_user.id)
 
 
-@router.message(Command("дом"))
+@router.message(Command("дом", "house"))
 async def house(message: Message, session: AsyncSession) -> None:
     c = await get_character(session, message.from_user.id)
     if not c or not c.house:
@@ -73,7 +73,15 @@ async def house(message: Message, session: AsyncSession) -> None:
 @router.callback_query(F.data == "menu:house")
 async def house_callback(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
-    await house(callback.message, session)
+    c = await get_character(session, callback.from_user.id)
+    if not c or not c.house:
+        await callback.message.answer("Дом не найден. Сначала /start в личном чате.")
+        return
+    h = c.house
+    text = (f"🏰 <b>{h.name}</b>\n👤 Владелец: {c.name}\n📍 Расположение: {h.location}\n"
+            f"📖 {h.description}\n⭐ Уровень: {h.level}\n💰 Стоимость: {h.value}\n"
+            f"🛡 Защита: {h.defense}\n📜 Статус: {h.status}")
+    await callback.message.answer_photo(h.image_file_id, caption=text)
 
 
 @router.message(Command("сменить_портрет"))
@@ -110,6 +118,6 @@ async def save_house(message: Message, state: FSMContext, session: AsyncSession)
     await message.answer("✅ Фотография дома обновлена.")
 
 
-@router.message(Command("меню"))
+@router.message(Command("меню", "menu"))
 async def menu(message: Message) -> None:
     await message.answer("Главное меню Королевства:", reply_markup=main_menu())

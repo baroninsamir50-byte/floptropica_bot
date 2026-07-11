@@ -27,7 +27,7 @@ async def training_menu(message: Message, session: AsyncSession, telegram_id: in
     await message.answer("Выберите характеристику:", reply_markup=stats_keyboard())
 
 
-@router.message(Command("тренировка"))
+@router.message(Command("тренировка", "training"))
 async def training(message: Message, session: AsyncSession) -> None:
     await training_menu(message, session, message.from_user.id)
 
@@ -66,7 +66,7 @@ async def train_stat(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
 
 
-@router.message(Command("профессии"))
+@router.message(Command("профессии", "professions"))
 async def professions(message: Message, session: AsyncSession) -> None:
     c = await get_character(session, message.from_user.id)
     if not c:
@@ -84,7 +84,7 @@ async def select_profession(callback: CallbackQuery, session: AsyncSession) -> N
     await callback.answer()
 
 
-@router.message(Command("фракции"))
+@router.message(Command("фракции", "factions"))
 async def factions(message: Message, session: AsyncSession) -> None:
     c = await get_character(session, message.from_user.id)
     if not c:

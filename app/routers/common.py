@@ -1,25 +1,11 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
-
-router = Router()
-
-
-@router.message(Command("помощь"))
-async def help_command(message: Message) -> None:
-    await message.answer(
-        "📜 <b>Команды Королевства</b>\n\n"
-        "/меню — главное меню\n"
-        "/профиль — карточка персонажа\n"
-        "/дом — карточка дома\n"
-        "/сменить_портрет — заменить одно фото персонажа\n"
-        "/сменить_фото_дома — заменить одно фото дома\n"
-        "/тренировка — ежедневная прокачка\n"
-        "/работа — начать двухчасовую работу\n"
-        "/работа_статус — получить награду\n"
-        "/магазин — купить предмет\n"
-        "/инвентарь — предметы и экипировка\n"
-        "/профессии — выбрать профессию\n"
-        "/фракции — выбрать фракцию\n"
-        "/npc — управление NPC"
-    )
+router=Router()
+@router.message(Command("ping"))
+async def ping(message:Message): await message.answer("🏓 Бот работает в этом чате.")
+@router.message(Command("myid"))
+async def myid(message:Message): await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>")
+@router.message(Command("помощь","help"))
+async def help_command(message:Message):
+    await message.answer("📜 Команды: /menu /profile /house /training /work /work_status /shop /inventory /factions /npcs /ping")

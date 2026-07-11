@@ -15,6 +15,10 @@ router = Router()
 
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext, session: AsyncSession) -> None:
+    if message.chat.type != "private":
+        me = await message.bot.get_me()
+        await message.answer(f"Регистрация проходит в личном чате: https://t.me/{me.username}?start=register")
+        return
     exists = await session.scalar(select(User.id).where(User.telegram_id == message.from_user.id))
     if exists:
         await message.answer("С возвращением в Королевство Флоптропика!", reply_markup=main_menu())

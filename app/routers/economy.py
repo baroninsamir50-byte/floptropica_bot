@@ -10,7 +10,7 @@ from app.keyboards import inventory_keyboard, npc_keyboard, shop_keyboard
 from app.models import InventoryItem, ItemTemplate, OwnedNpc
 from app.services import (
     buy_item, buy_npc, claim_work, collect_npc_income, get_character,
-    start_work, toggle_equip,
+    start_work, toggle_equip, get_daily_shop_items, local_date,
 )
 
 router = Router()
@@ -28,7 +28,7 @@ async def show_work(message: Message, session: AsyncSession, telegram_id: int) -
         await message.answer(str(exc))
 
 
-@router.message(Command("работа"))
+@router.message(Command("работа", "work"))
 async def work(message: Message, session: AsyncSession) -> None:
     await show_work(message, session, message.from_user.id)
 
@@ -39,7 +39,7 @@ async def work_callback(callback: CallbackQuery, session: AsyncSession) -> None:
     await show_work(callback.message, session, callback.from_user.id)
 
 
-@router.message(Command("работа_статус"))
+@router.message(Command("работа_статус", "work_status"))
 async def work_status(message: Message, session: AsyncSession) -> None:
     c = await get_character(session, message.from_user.id)
     if not c:
@@ -53,14 +53,16 @@ async def work_status(message: Message, session: AsyncSession) -> None:
 
 
 async def show_shop(message: Message, session: AsyncSession) -> None:
-    result = await session.execute(select(ItemTemplate).order_by(ItemTemplate.price))
-    items = result.scalars().all()
+    items = await get_daily_shop_items(session, 5)
     rows = [(item.id, item.name, item.price) for item in items]
-    text = "🛒 <b>Королевский магазин</b>\n\nРынка между игроками нет."
-    await message.answer(text, reply_markup=shop_keyboard(rows))
+    lines = ["🛒 <b>Королевский магазин</b>", f"📅 Ассортимент на {local_date()}", "", "Сегодня доступны 5 товаров:"]
+    for item in items:
+        lines.append(f"• <b>{item.name}</b> — {item.price} 🪙\n  {item.rarity}. {item.description}")
+    lines.append("\nАссортимент сменится на следующие сутки.")
+    await message.answer("\n".join(lines), reply_markup=shop_keyboard(rows))
 
 
-@router.message(Command("магазин"))
+@router.message(Command("магазин", "shop"))
 async def shop(message: Message, session: AsyncSession) -> None:
     await show_shop(message, session)
 
@@ -105,7 +107,7 @@ async def show_inventory(message: Message, session: AsyncSession, telegram_id: i
     await message.answer("\n".join(lines), reply_markup=inventory_keyboard(buttons))
 
 
-@router.message(Command("инвентарь", "экипировка"))
+@router.message(Command("инвентарь", "экипировка", "inventory", "equipment"))
 async def inventory(message: Message, session: AsyncSession) -> None:
     await show_inventory(message, session, message.from_user.id)
 
@@ -145,7 +147,7 @@ async def show_npc(message: Message, session: AsyncSession, telegram_id: int) ->
     await message.answer(text, reply_markup=npc_keyboard())
 
 
-@router.message(Command("npc"))
+@router.message(Command("npc", "npcs"))
 async def npcs(message: Message, session: AsyncSession) -> None:
     await show_npc(message, session, message.from_user.id)
 
