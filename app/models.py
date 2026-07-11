@@ -146,3 +146,55 @@ class GameEvent(Base):
     title: Mapped[str] = mapped_column(String(160))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Duel(Base):
+    __tablename__ = "duels"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    challenger_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    opponent_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    status: Mapped[str] = mapped_column(String(24), default="invited", index=True)
+    turn_character_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
+    challenger_hp: Mapped[int] = mapped_column(Integer, default=100)
+    opponent_hp: Mapped[int] = mapped_column(Integer, default=100)
+    challenger_mana: Mapped[int] = mapped_column(Integer, default=50)
+    opponent_mana: Mapped[int] = mapped_column(Integer, default=50)
+    challenger_defending: Mapped[bool] = mapped_column(Boolean, default=False)
+    opponent_defending: Mapped[bool] = mapped_column(Boolean, default=False)
+    winner_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Expedition(Base):
+    __tablename__ = "expeditions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    host_character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    status: Mapped[str] = mapped_column(String(24), default="lobby", index=True)
+    round_number: Mapped[int] = mapped_column(Integer, default=0)
+    max_rounds: Mapped[int] = mapped_column(Integer, default=5)
+    party_hp: Mapped[int] = mapped_column(Integer, default=100)
+    treasure: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ExpeditionMember(Base):
+    __tablename__ = "expedition_members"
+    __table_args__ = (UniqueConstraint("expedition_id", "character_id", name="uq_expedition_member"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    expedition_id: Mapped[int] = mapped_column(ForeignKey("expeditions.id", ondelete="CASCADE"), index=True)
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"), index=True)
+    role: Mapped[str] = mapped_column(String(32), default="Искатель")
+
+
+class ExpeditionVote(Base):
+    __tablename__ = "expedition_votes"
+    __table_args__ = (UniqueConstraint("expedition_id", "round_number", "character_id", name="uq_expedition_round_vote"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    expedition_id: Mapped[int] = mapped_column(ForeignKey("expeditions.id", ondelete="CASCADE"), index=True)
+    round_number: Mapped[int] = mapped_column(Integer)
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
+    choice: Mapped[str] = mapped_column(String(32))

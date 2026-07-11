@@ -19,6 +19,7 @@ def main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🚩 Фракции", callback_data="menu:factions"),
             InlineKeyboardButton(text="🧑‍🌾 NPC", callback_data="menu:npc"),
         ],
+        [InlineKeyboardButton(text="🎲 Игры", callback_data="menu:games")],
     ])
 
 
@@ -90,3 +91,48 @@ def admin_roles_keyboard(tid: int) -> InlineKeyboardMarkup:
     rows=[[InlineKeyboardButton(text=label, callback_data=f"setrole:{tid}:{key}")] for label,key in roles]
     rows.append([InlineKeyboardButton(text="⬅ К игрокам", callback_data="admin:players")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+
+def games_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔ Как вызвать на дуэль", callback_data="games:duel_help")],
+        [InlineKeyboardButton(text="🧭 Создать экспедицию", callback_data="games:expedition_create")],
+        [InlineKeyboardButton(text="📜 Правила игр", callback_data="games:rules")],
+    ])
+
+
+def duel_invite_keyboard(duel_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Принять", callback_data=f"duelaccept:{duel_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"dueldecline:{duel_id}"),
+    ]])
+
+
+def duel_actions_keyboard(duel_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔ Атака", callback_data=f"duelact:{duel_id}:attack"),
+            InlineKeyboardButton(text="🔮 Магия", callback_data=f"duelact:{duel_id}:magic"),
+        ],
+        [
+            InlineKeyboardButton(text="🛡 Защита", callback_data=f"duelact:{duel_id}:defend"),
+            InlineKeyboardButton(text="🏳 Сдаться", callback_data=f"duelact:{duel_id}:surrender"),
+        ],
+    ])
+
+
+def expedition_lobby_keyboard(expedition_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Вступить", callback_data=f"expjoin:{expedition_id}")],
+        [InlineKeyboardButton(text="🚀 Начать", callback_data=f"expstart:{expedition_id}")],
+        [InlineKeyboardButton(text="❌ Отменить", callback_data=f"expcancel:{expedition_id}")],
+    ])
+
+
+def expedition_choices_keyboard(expedition_id: int, round_number: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌲 Лесная тропа", callback_data=f"expvote:{expedition_id}:{round_number}:forest")],
+        [InlineKeyboardButton(text="🏚 Древние руины", callback_data=f"expvote:{expedition_id}:{round_number}:ruins")],
+        [InlineKeyboardButton(text="🌀 Магический портал", callback_data=f"expvote:{expedition_id}:{round_number}:portal")],
+    ])

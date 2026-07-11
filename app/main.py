@@ -10,7 +10,7 @@ from aiogram.types import BotCommand
 from app.config import get_settings
 from app.database import init_database, SessionFactory
 from app.middlewares import DatabaseMiddleware
-from app.routers import admin, common, economy, gameplay, profile, registration
+from app.routers import admin, common, economy, gameplay, games, profile, registration
 from app.services import seed_items
 
 
@@ -39,6 +39,7 @@ async def run_bot() -> None:
     dp.include_router(profile.router)
     dp.include_router(gameplay.router)
     dp.include_router(economy.router)
+    dp.include_router(games.router)
     dp.include_router(admin.router)
     dp.include_router(common.router)
 
