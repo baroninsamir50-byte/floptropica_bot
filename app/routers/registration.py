@@ -21,7 +21,10 @@ async def start(message: Message, state: FSMContext, session: AsyncSession) -> N
         return
     exists = await session.scalar(select(User.id).where(User.telegram_id == message.from_user.id))
     if exists:
-        await message.answer("С возвращением в Королевство Флоптропика!", reply_markup=main_menu())
+        await message.answer(
+            "С возвращением в Королевство Флоптропика!",
+            reply_markup=main_menu(message.from_user.id in get_settings().admins),
+        )
         return
     await state.clear()
     await state.set_state(Registration.name)
@@ -93,7 +96,7 @@ async def registration_house_photo(
     await state.clear()
     await message.answer(
         "✅ Персонаж и дом созданы. Вы получили 10 золотых.",
-        reply_markup=main_menu(),
+        reply_markup=main_menu(message.from_user.id in settings.admins),
     )
 
 

@@ -13,26 +13,34 @@ from app.keyboards import (
     expedition_lobby_keyboard, games_keyboard,
 )
 from app.models import Character, Duel, Expedition, ExpeditionMember, ExpeditionVote, User
-from app.services import apply_levels, change_gold, get_character
+from app.services import (
+    apply_levels, change_gold, get_character, get_effective_stats, percent_bonus,
+)
 
 router = Router()
 
 
-async def by_username(session, username):
+def clamp(value: int, low: int, high: int) -> int:
+    return max(low, min(high, value))
+
+
+async def by_username(session: AsyncSession, username: str) -> Character | None:
     result = await session.execute(
-        select(Character).join(User).where(func.lower(User.username) == username.lstrip("@").lower())
+        select(Character).join(User).where(
+            func.lower(User.username) == username.lstrip("@").lower()
+        )
     )
     return result.scalar_one_or_none()
 
 
-async def telegram_id_for(session, character_id):
+async def telegram_id_for(session: AsyncSession, character_id: int) -> int | None:
     result = await session.execute(
         select(User.telegram_id).join(Character).where(Character.id == character_id)
     )
     return result.scalar_one_or_none()
 
 
-async def active_duel(session, character_id):
+async def active_duel(session: AsyncSession, character_id: int) -> Duel | None:
     result = await session.execute(select(Duel).where(
         Duel.status.in_(["invited", "active"]),
         or_(Duel.challenger_id == character_id, Duel.opponent_id == character_id),
@@ -40,16 +48,27 @@ async def active_duel(session, character_id):
     return result.scalars().first()
 
 
-async def duel_players(session, duel):
-    return await session.get(Character, duel.challenger_id), await session.get(Character, duel.opponent_id)
-
-
-def duel_text(duel, a, b):
-    turn = a.name if duel.turn_character_id == a.id else b.name
+async def duel_players(session: AsyncSession, duel: Duel):
     return (
-        f"⚔ <b>Дуэль</b>\n\n"
-        f"{a.name}: ❤️ {duel.challenger_hp} | 🔮 {duel.challenger_mana}\n"
-        f"{b.name}: ❤️ {duel.opponent_hp} | 🔮 {duel.opponent_mana}\n\n"
+        await session.get(Character, duel.challenger_id),
+        await session.get(Character, duel.opponent_id),
+    )
+
+
+async def duel_text(session: AsyncSession, duel: Duel, a: Character, b: Character) -> str:
+    sa = await get_effective_stats(session, a)
+    sb = await get_effective_stats(session, b)
+    turn = a.name if duel.turn_character_id == a.id else b.name
+    a_agi = percent_bonus(sa["agility"], sb["agility"])
+    b_agi = percent_bonus(sb["agility"], sa["agility"])
+    a_end = percent_bonus(sa["endurance"], sb["endurance"])
+    b_end = percent_bonus(sb["endurance"], sa["endurance"])
+    return (
+        f"⚔ <b>Королевская дуэль</b>\n\n"
+        f"<b>{a.name}</b>: ❤️ {duel.challenger_hp} | 🔮 {duel.challenger_mana}\n"
+        f"Ловкость: +{a_agi}% к уклонению | Выносливость: +{a_end}% к защите\n\n"
+        f"<b>{b.name}</b>: ❤️ {duel.opponent_hp} | 🔮 {duel.opponent_mana}\n"
+        f"Ловкость: +{b_agi}% к уклонению | Выносливость: +{b_end}% к защите\n\n"
         f"Ход: <b>{turn}</b>"
     )
 
@@ -57,9 +76,9 @@ def duel_text(duel, a, b):
 @router.message(Command("games", "игры"))
 async def games(message: Message):
     await message.answer(
-        "🎲 <b>Игры Королевства</b>\n\n"
-        "⚔ Дуэль — бой двух игроков.\n"
-        "🧭 Проклятый лабиринт — экспедиция до 6 игроков.",
+        "🎲 <b>Игровая арена Флоптропики</b>\n\n"
+        "⚔ <b>Дуэль</b> — характеристики, уровень и экипировка влияют на бой.\n"
+        "🧭 <b>Проклятый лабиринт</b> — кооперативное испытание для 2–6 игроков.",
         reply_markup=games_keyboard(),
     )
 
@@ -67,15 +86,24 @@ async def games(message: Message):
 @router.callback_query(F.data == "menu:games")
 async def games_cb(callback: CallbackQuery):
     await callback.answer()
-    await callback.message.answer("🎲 <b>Игры Королевства</b>", reply_markup=games_keyboard())
+    await callback.message.answer(
+        "🎲 <b>Игровая арена Флоптропики</b>",
+        reply_markup=games_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "games:rules")
 async def rules(callback: CallbackQuery):
     await callback.answer()
     await callback.message.answer(
-        "⚔ Ответьте <code>/duel</code> на сообщение соперника или укажите <code>/duel @username</code>.\n\n"
-        "🧭 Введите <code>/expedition</code>. Команда до 6 игроков голосует за путь на пяти этапах."
+        "⚔ <b>Дуэль</b>\n"
+        "Сила — физический урон. Магия и интеллект — заклинания. "
+        "Ловкость даёт 1–5% уклонения, выносливость — 1–5% защиты, "
+        "удача — 1–5% критического шанса, харизма — шанс собраться при низком здоровье.\n\n"
+        "🧭 <b>Лабиринт</b>\n"
+        "Лес проверяет силу и ловкость, руины — интеллект и удачу, "
+        "портал — магию и запас маны. Выносливость уменьшает урон, "
+        "харизма усиливает согласованность команды."
     )
 
 
@@ -113,18 +141,25 @@ async def duel_create(message: Message, session: AsyncSession):
         await message.answer("Нельзя вызвать самого себя.")
         return
     if await active_duel(session, challenger.id) or await active_duel(session, opponent.id):
-        await message.answer("Один из игроков уже участвует в дуэли.")
+        await message.answer("Один из игроков уже занят дуэлью.")
         return
 
+    sc = await get_effective_stats(session, challenger)
+    so = await get_effective_stats(session, opponent)
     duel = Duel(
-        chat_id=message.chat.id, challenger_id=challenger.id, opponent_id=opponent.id,
-        challenger_hp=max(30, challenger.health), opponent_hp=max(30, opponent.health),
-        challenger_mana=challenger.mana, opponent_mana=opponent.mana,
+        chat_id=message.chat.id,
+        challenger_id=challenger.id,
+        opponent_id=opponent.id,
+        challenger_hp=sc["health"] + sc["endurance"] * 2 + challenger.level * 2,
+        opponent_hp=so["health"] + so["endurance"] * 2 + opponent.level * 2,
+        challenger_mana=sc["mana"] + sc["intelligence"],
+        opponent_mana=so["mana"] + so["intelligence"],
     )
     session.add(duel)
     await session.flush()
     await message.answer(
-        f"⚔ <b>{challenger.name}</b> вызывает <b>{opponent.name}</b> на дуэль!",
+        f"⚔ <b>{challenger.name}</b> вызывает <b>{opponent.name}</b> на дуэль!\n"
+        "В бою учитываются характеристики и надетые предметы.",
         reply_markup=duel_invite_keyboard(duel.id),
     )
 
@@ -139,10 +174,17 @@ async def duel_accept(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Приглашение адресовано другому игроку.", show_alert=True)
         return
     a, b = await duel_players(session, duel)
+    sa = await get_effective_stats(session, a)
+    sb = await get_effective_stats(session, b)
     duel.status = "active"
-    duel.turn_character_id = a.id if a.agility >= b.agility else b.id
+    initiative_a = sa["agility"] + sa["luck"] // 2 + randint(1, 10)
+    initiative_b = sb["agility"] + sb["luck"] // 2 + randint(1, 10)
+    duel.turn_character_id = a.id if initiative_a >= initiative_b else b.id
     await callback.answer("Дуэль началась!")
-    await callback.message.edit_text(duel_text(duel, a, b), reply_markup=duel_actions_keyboard(duel.id))
+    await callback.message.edit_text(
+        await duel_text(session, duel, a, b),
+        reply_markup=duel_actions_keyboard(duel.id),
+    )
 
 
 @router.callback_query(F.data.startswith("dueldecline:"))
@@ -170,7 +212,7 @@ async def finish_duel(callback, session, duel, winner, loser, reason):
     apply_levels(loser)
     await callback.message.edit_text(
         f"🏆 <b>{winner.name}</b> побеждает!\nПричина: {reason}\n\n"
-        "Победитель: 3 🪙 и 20 XP. Проигравший: 5 XP."
+        "Победитель получает 3 🪙 и 20 XP. Проигравший получает 5 XP."
     )
 
 
@@ -192,7 +234,10 @@ async def duel_action(callback: CallbackQuery, session: AsyncSession):
 
     first = actor.id == a.id
     target = b if first else a
+    sa = await get_effective_stats(session, actor)
+    st = await get_effective_stats(session, target)
     hp_attr = "opponent_hp" if first else "challenger_hp"
+    actor_hp_attr = "challenger_hp" if first else "opponent_hp"
     mana_attr = "challenger_mana" if first else "opponent_mana"
     actor_def = "challenger_defending" if first else "opponent_defending"
     target_def = "opponent_defending" if first else "challenger_defending"
@@ -202,42 +247,72 @@ async def duel_action(callback: CallbackQuery, session: AsyncSession):
         await finish_duel(callback, session, duel, target, actor, "соперник сдался")
         return
 
+    log = ""
     if action == "defend":
         setattr(duel, actor_def, True)
-        log = f"🛡 {actor.name} защищается."
+        restored = max(1, sa["endurance"] // 4)
+        setattr(duel, actor_hp_attr, getattr(duel, actor_hp_attr) + restored)
+        log = f"🛡 {actor.name} укрепляет защиту и восстанавливает {restored} здоровья."
     else:
-        if action == "magic":
-            mana = getattr(duel, mana_attr)
-            if mana < 10:
-                await callback.answer("Нужно 10 маны.", show_alert=True)
-                return
-            setattr(duel, mana_attr, mana - 10)
-            damage = randint(7, 13) + actor.magic
-            label = "заклинание"
+        evade_bonus = percent_bonus(st["agility"], sa["agility"])
+        hit_chance = clamp(92 - evade_bonus, 70, 97)
+        if randint(1, 100) > hit_chance:
+            log = f"💨 {target.name} уклоняется! Ловкость дала +{evade_bonus}% к шансу избежать удара."
         else:
-            damage = randint(5, 10) + actor.strength
-            critical = randint(1, 100) <= min(35, 5 + actor.luck)
-            if critical:
-                damage = int(damage * 1.5)
-            label = "критический удар" if critical else "атаку"
-        damage = max(1, damage - target.endurance // 3)
-        if getattr(duel, target_def):
-            damage = max(1, damage // 2)
-            setattr(duel, target_def, False)
-        setattr(duel, hp_attr, max(0, getattr(duel, hp_attr) - damage))
-        log = f"💥 {actor.name} применяет {label}: {damage} урона."
+            if action == "magic":
+                mana_cost = max(6, 12 - min(5, sa["intelligence"] // 8))
+                mana = getattr(duel, mana_attr)
+                if mana < mana_cost:
+                    await callback.answer(f"Нужно {mana_cost} маны.", show_alert=True)
+                    return
+                setattr(duel, mana_attr, mana - mana_cost)
+                damage = randint(8, 14) + sa["magic"] + sa["intelligence"] // 3
+                label = "заклинание"
+            else:
+                damage = randint(6, 11) + sa["strength"] + actor.level // 2
+                crit_bonus = percent_bonus(sa["luck"], st["luck"])
+                critical = randint(1, 100) <= 5 + crit_bonus
+                if critical:
+                    damage = int(damage * 1.55)
+                label = "критическую атаку" if critical else "атаку"
+
+            endurance_bonus = percent_bonus(st["endurance"], sa["endurance"])
+            damage = max(1, damage - st["endurance"] // 3)
+            damage = max(1, int(damage * (100 - endurance_bonus) / 100))
+            if getattr(duel, target_def):
+                shield = 40 + endurance_bonus
+                damage = max(1, int(damage * (100 - shield) / 100))
+                setattr(duel, target_def, False)
+            setattr(duel, hp_attr, max(0, getattr(duel, hp_attr) - damage))
+            log = (
+                f"💥 {actor.name} применяет {label}: {damage} урона. "
+                f"Выносливость цели снизила урон на {endurance_bonus}%."
+            )
+
+    # Харизма даёт 1–5% шанс собраться при критическом здоровье.
+    current_hp = getattr(duel, actor_hp_attr)
+    max_hp = sa["health"] + sa["endurance"] * 2 + actor.level * 2
+    if current_hp > 0 and current_hp <= max_hp // 4:
+        resolve = min(5, max(1, sa["charisma"] // 5))
+        if randint(1, 100) <= resolve:
+            heal = 5 + sa["charisma"] // 4
+            setattr(duel, actor_hp_attr, current_hp + heal)
+            log += f"\n🎭 Харизма помогает собраться: +{heal} здоровья."
 
     if getattr(duel, hp_attr) <= 0:
         await callback.answer()
         await finish_duel(callback, session, duel, actor, target, "здоровье соперника закончилось")
         return
+
     duel.turn_character_id = target.id
     await callback.answer()
     await callback.message.edit_text(
-        f"{log}\n\n{duel_text(duel, a, b)}",
+        f"{log}\n\n{await duel_text(session, duel, a, b)}",
         reply_markup=duel_actions_keyboard(duel.id),
     )
 
+
+# ---------------- EXPEDITION ----------------
 
 async def current_exp(session, chat_id):
     result = await session.execute(
@@ -264,7 +339,7 @@ def lobby_text(exp, rows):
     return (
         "🧭 <b>Экспедиция: Проклятый лабиринт</b>\n\n"
         f"Участники: {len(rows)}/6\n{names}\n\n"
-        "Создатель запускает игру после набора команды."
+        "Все характеристики участников складываются в силу команды."
     )
 
 
@@ -342,7 +417,8 @@ def round_text(exp):
     return (
         f"🧭 <b>Проклятый лабиринт</b>\n\n"
         f"Этап {exp.round_number}/{exp.max_rounds}\n"
-        f"❤️ Здоровье отряда: {exp.party_hp}/100\n"
+        f"❤️ Здоровье отряда: {exp.party_hp}\n"
+        f"🔮 Общая мана: {exp.party_mana}\n"
         f"💰 Сокровища: {exp.treasure}\n\n"
         "Каждый участник голосует за путь:"
     )
@@ -362,6 +438,10 @@ async def exp_start(callback: CallbackQuery, session: AsyncSession):
     if len(rows) < 2:
         await callback.answer("Нужно минимум 2 игрока, максимум 6.", show_alert=True)
         return
+
+    stats = [await get_effective_stats(session, c) for _, c in rows]
+    exp.party_hp = 100 + sum(s["health"] + s["endurance"] * 2 for s in stats) // len(stats) // 3
+    exp.party_mana = sum(s["mana"] + s["intelligence"] for s in stats) // len(stats)
     exp.status = "active"
     exp.round_number = 1
     await callback.answer("Экспедиция началась!")
@@ -412,7 +492,8 @@ async def exp_vote(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Вы уже проголосовали.", show_alert=True)
         return
     session.add(ExpeditionVote(
-        expedition_id=exp.id, round_number=round_num, character_id=char.id, choice=route
+        expedition_id=exp.id, round_number=round_num,
+        character_id=char.id, choice=route,
     ))
     await session.flush()
     result = await session.execute(select(ExpeditionVote.choice).where(
@@ -426,31 +507,55 @@ async def exp_vote(callback: CallbackQuery, session: AsyncSession):
 
     counts = Counter(votes)
     top = max(counts.values())
-    route = choice([r for r, n in counts.items() if n == top])
+    selected = choice([r for r, n in counts.items() if n == top])
     chars = [c for _, c in rows]
-    names = {"forest": "🌲 Лесная тропа", "ruins": "🏚 Древние руины", "portal": "🌀 Магический портал"}
-    descriptions = {
-        "forest": "Отряд встречает теневых волков.",
-        "ruins": "Пробуждаются каменные стражи.",
-        "portal": "Портал искажает пространство.",
-    }
-    if route == "forest":
-        power = sum(c.strength + c.agility for c in chars)
-    elif route == "ruins":
-        power = sum(c.intelligence + c.luck for c in chars)
-    else:
-        power = sum(c.magic + c.endurance for c in chars)
-    passed = power + randint(0, len(chars) * 10) >= len(chars) * 12
-    if passed:
-        gain = randint(5, 12)
-        exp.treasure += gain
-        outcome = f"✅ Успех! Найдено {gain} золота."
-    else:
-        damage = randint(10, 24)
-        exp.party_hp = max(0, exp.party_hp - damage)
-        outcome = f"❌ Отряд теряет {damage} здоровья."
+    stats = [await get_effective_stats(session, c) for c in chars]
 
-    prefix = f"{names[route]}\n{descriptions[route]}\n\n{outcome}"
+    charisma = sum(s["charisma"] for s in stats)
+    endurance = sum(s["endurance"] for s in stats)
+    level_power = sum(c.level for c in chars)
+    route_names = {
+        "forest": "🌲 Лесная тропа",
+        "ruins": "🏚 Древние руины",
+        "portal": "🌀 Магический портал",
+    }
+
+    if selected == "forest":
+        core = sum(s["strength"] + s["agility"] for s in stats)
+        description = "Команда отбивается от теневых зверей."
+    elif selected == "ruins":
+        core = sum(s["intelligence"] + s["luck"] for s in stats)
+        description = "Команда разгадывает ловушки древних стражей."
+    else:
+        mana_cost = 8 + len(chars) * 2
+        if exp.party_mana >= mana_cost:
+            exp.party_mana -= mana_cost
+            mana_boost = 12
+        else:
+            mana_boost = -8
+        core = sum(s["magic"] + s["intelligence"] for s in stats) + mana_boost
+        description = "Команда стабилизирует опасный магический портал."
+
+    coordination = min(15, charisma // max(1, len(chars) * 4))
+    target = len(chars) * 18 + exp.round_number * 4
+    chance = clamp(45 + (core + level_power - target) // 3 + coordination, 15, 90)
+    passed = randint(1, 100) <= chance
+
+    if passed:
+        gain = randint(6, 14) + exp.round_number
+        exp.treasure += gain
+        outcome = f"✅ Успех с шансом {chance}%. Найдено {gain} золота."
+    else:
+        base_damage = randint(14, 28) + exp.round_number * 2
+        reduction = min(25, endurance // max(1, len(chars) * 3))
+        damage = max(5, int(base_damage * (100 - reduction) / 100))
+        exp.party_hp = max(0, exp.party_hp - damage)
+        outcome = (
+            f"❌ Проверка с шансом {chance}% провалена. "
+            f"Выносливость уменьшила урон на {reduction}%. Потеряно {damage} здоровья."
+        )
+
+    prefix = f"{route_names[selected]}\n{description}\n\n{outcome}"
     if exp.party_hp <= 0:
         await callback.message.edit_text(prefix)
         await finish_exp(callback.message, session, exp, False)
@@ -461,6 +566,6 @@ async def exp_vote(callback: CallbackQuery, session: AsyncSession):
         return
     exp.round_number += 1
     await callback.message.edit_text(
-        prefix + f"\n\nЭтап {exp.round_number}/{exp.max_rounds}. Выберите путь:",
+        prefix + f"\n\n{round_text(exp)}",
         reply_markup=expedition_choices_keyboard(exp.id, exp.round_number),
     )

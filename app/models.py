@@ -84,6 +84,9 @@ class House(Base):
     value: Mapped[int] = mapped_column(Integer, default=100)
     defense: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(64), default="Жилой дом")
+    integrity: Mapped[int] = mapped_column(Integer, default=100)
+    repair_energy: Mapped[int] = mapped_column(Integer, default=0)
+    last_attack_date: Mapped[str | None] = mapped_column(String(10))
 
     owner: Mapped[Character] = relationship(back_populates="house")
 
@@ -177,6 +180,7 @@ class Expedition(Base):
     max_rounds: Mapped[int] = mapped_column(Integer, default=5)
     party_hp: Mapped[int] = mapped_column(Integer, default=100)
     treasure: Mapped[int] = mapped_column(Integer, default=0)
+    party_mana: Mapped[int] = mapped_column(Integer, default=50)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -198,3 +202,25 @@ class ExpeditionVote(Base):
     round_number: Mapped[int] = mapped_column(Integer)
     character_id: Mapped[int] = mapped_column(ForeignKey("characters.id"))
     choice: Mapped[str] = mapped_column(String(32))
+
+
+
+class HouseAttack(Base):
+    __tablename__ = "house_attacks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    house_id: Mapped[int] = mapped_column(ForeignKey("houses.id", ondelete="CASCADE"), index=True)
+    enemy_name: Mapped[str] = mapped_column(String(80))
+    enemy_type: Mapped[str] = mapped_column(String(32))
+    enemy_power: Mapped[int] = mapped_column(Integer)
+    enemy_hp: Mapped[int] = mapped_column(Integer)
+    player_hp: Mapped[int | None] = mapped_column(Integer)
+    player_mana: Mapped[int | None] = mapped_column(Integer)
+    player_defending: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(32), default="waiting", index=True)
+    response_deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    guard_finish_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    guards_used: Mapped[int] = mapped_column(Integer, default=0)
+    damage_done: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

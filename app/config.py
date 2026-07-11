@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     port: int = 10000
     timezone: str = "Europe/Amsterdam"
+    house_attack_hour: int = 18
+    house_attacks_enabled: bool = True
+    cron_secret: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -1,26 +1,31 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
-def main_menu() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
+def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
+    rows = [
         [
-            InlineKeyboardButton(text="👤 Персонаж", callback_data="menu:profile"),
-            InlineKeyboardButton(text="🏠 Дом", callback_data="menu:house"),
+            InlineKeyboardButton(text="👤 Герой", callback_data="menu:profile"),
+            InlineKeyboardButton(text="🏰 Владение", callback_data="menu:house"),
         ],
         [
-            InlineKeyboardButton(text="🏋 Тренировка", callback_data="menu:training"),
-            InlineKeyboardButton(text="💼 Работа", callback_data="menu:work"),
+            InlineKeyboardButton(text="🎲 Игровая арена", callback_data="menu:games"),
         ],
         [
-            InlineKeyboardButton(text="🎒 Инвентарь", callback_data="menu:inventory"),
-            InlineKeyboardButton(text="🛒 Магазин", callback_data="menu:shop"),
+            InlineKeyboardButton(text="🏋 Развитие", callback_data="menu:training"),
+            InlineKeyboardButton(text="💼 Казна", callback_data="menu:work"),
+        ],
+        [
+            InlineKeyboardButton(text="🎒 Снаряжение", callback_data="menu:inventory"),
+            InlineKeyboardButton(text="🛒 Магазин дня", callback_data="menu:shop"),
         ],
         [
             InlineKeyboardButton(text="🚩 Фракции", callback_data="menu:factions"),
-            InlineKeyboardButton(text="🧑‍🌾 NPC", callback_data="menu:npc"),
+            InlineKeyboardButton(text="🛡 Защита дома", callback_data="house:defense"),
         ],
-        [InlineKeyboardButton(text="🎲 Игры", callback_data="menu:games")],
-    ])
+    ]
+    if is_admin:
+        rows.append([InlineKeyboardButton(text="⚙ Панель создателя", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def stats_keyboard() -> InlineKeyboardMarkup:
@@ -136,3 +141,79 @@ def expedition_choices_keyboard(expedition_id: int, round_number: int) -> Inline
         [InlineKeyboardButton(text="🏚 Древние руины", callback_data=f"expvote:{expedition_id}:{round_number}:ruins")],
         [InlineKeyboardButton(text="🌀 Магический портал", callback_data=f"expvote:{expedition_id}:{round_number}:portal")],
     ])
+
+
+
+def house_panel_keyboard(active_attack_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(text="🛡 Состояние защиты", callback_data="house:defense"),
+            InlineKeyboardButton(text="🔧 Ремонт", callback_data="house:repair"),
+        ],
+        [
+            InlineKeyboardButton(text="👮 Стража", callback_data="menu:npc"),
+            InlineKeyboardButton(text="📜 Последняя угроза", callback_data="house:last_attack"),
+        ],
+    ]
+    if active_attack_id:
+        rows.insert(0, [
+            InlineKeyboardButton(text="⚔ Защитить лично", callback_data=f"housefight:{active_attack_id}"),
+            InlineKeyboardButton(text="👮 Отправить стражу", callback_data=f"houseguards:{active_attack_id}"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def house_attack_keyboard(attack_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔ Сражаться самому", callback_data=f"housefight:{attack_id}"),
+            InlineKeyboardButton(text="👮 Отправить стражу", callback_data=f"houseguards:{attack_id}"),
+        ],
+        [InlineKeyboardButton(text="🏰 Открыть панель дома", callback_data="house:defense")],
+    ])
+
+
+def house_battle_keyboard(attack_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔ Силовая атака", callback_data=f"houseact:{attack_id}:attack"),
+            InlineKeyboardButton(text="🔮 Магический удар", callback_data=f"houseact:{attack_id}:magic"),
+        ],
+        [
+            InlineKeyboardButton(text="🛡 Укрепить оборону", callback_data=f"houseact:{attack_id}:defend"),
+            InlineKeyboardButton(text="👮 Передать стражникам", callback_data=f"houseguards:{attack_id}"),
+        ],
+    ])
+
+
+def repair_house_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔧 Восстановить 10", callback_data="houserepair:10"),
+            InlineKeyboardButton(text="🏗 Восстановить максимум", callback_data="houserepair:max"),
+        ],
+        [InlineKeyboardButton(text="⬅ К дому", callback_data="house:defense")],
+    ])
+
+
+def admin_extended_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Настройки игроков", callback_data="admin:players")],
+        [
+            InlineKeyboardButton(text="🐉 Напасть на дом", callback_data="admin:attack_players"),
+            InlineKeyboardButton(text="🏗 Починить все дома", callback_data="admin:repair_all"),
+        ],
+        [
+            InlineKeyboardButton(text="📢 Событие", callback_data="admin:event_help"),
+            InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats"),
+        ],
+    ])
+
+
+def admin_attack_players_keyboard(players: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"🐉 {name}", callback_data=f"adminattack:{telegram_id}")]
+        for telegram_id, name in players
+    ]
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

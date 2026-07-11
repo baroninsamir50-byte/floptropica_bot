@@ -218,3 +218,24 @@ async def collect_npc_income(session: AsyncSession, character: Character) -> int
     peasants.last_income_date = today
     await change_gold(session, character, amount, "npc_daily_income")
     return amount
+
+
+
+async def get_effective_stats(session: AsyncSession, character: Character) -> dict[str, int]:
+    bonuses = await get_equipment_bonuses(session, character.id)
+    names = (
+        "health", "mana", "strength", "intelligence", "agility",
+        "magic", "luck", "endurance", "charisma",
+    )
+    return {
+        name: max(0, int(getattr(character, name)) + bonuses.get(name, 0))
+        for name in names
+    }
+
+
+def percent_bonus(value: int, opponent_value: int) -> int:
+    """Преимущество характеристики даёт от 1 до 5 процентов."""
+    difference = value - opponent_value
+    if difference <= 0:
+        return 0
+    return min(5, max(1, difference // 3 + 1))

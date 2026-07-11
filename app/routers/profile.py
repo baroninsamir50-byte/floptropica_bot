@@ -4,7 +4,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.keyboards import main_menu
+from app.config import get_settings
+from app.keyboards import house_panel_keyboard, main_menu
 from app.services import get_character, xp_for_next
 from app.states import ChangeHousePhoto, ChangePortrait
 
@@ -65,7 +66,9 @@ async def house(message: Message, session: AsyncSession) -> None:
         f"⭐ Уровень: {h.level}\n"
         f"💰 Стоимость: {h.value}\n"
         f"🛡 Защита: {h.defense}\n"
-        f"📜 Статус: {h.status}"
+        f"📜 Статус: {h.status}\n"
+        f"🏗 Прочность: {h.integrity}/100\n"
+        f"✨ Энергия ремонта: {h.repair_energy}"
     )
     await message.answer_photo(h.image_file_id, caption=text)
 
@@ -120,4 +123,7 @@ async def save_house(message: Message, state: FSMContext, session: AsyncSession)
 
 @router.message(Command("меню", "menu"))
 async def menu(message: Message) -> None:
-    await message.answer("Главное меню Королевства:", reply_markup=main_menu())
+    await message.answer(
+        "👑 <b>Центральная панель Королевства</b>\nВыберите раздел:",
+        reply_markup=main_menu(message.from_user.id in get_settings().admins),
+    )
