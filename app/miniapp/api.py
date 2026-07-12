@@ -46,6 +46,23 @@ class ItemRequest(BaseModel):
 class InventoryRequest(BaseModel):
     inventory_id: int
 
+
+async def telegram_file_response(file_id: str) -> Response:
+    from app.config import get_settings
+    bot = Bot(get_settings().bot_token)
+    try:
+        telegram_file = await bot.get_file(file_id)
+        stream = BytesIO()
+        await bot.download_file(telegram_file.file_path, destination=stream)
+        return Response(
+            content=stream.getvalue(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=900"},
+        )
+    finally:
+        await bot.session.close()
+
+
 @router.get("/bootstrap")
 async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
     c = await require_character(user, session)
@@ -63,7 +80,7 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
     } for inv,item in inv_result.all()]
     npc_result=await session.execute(select(OwnedNpc).where(OwnedNpc.character_id==c.id))
     npcs={n.npc_type:n.quantity for n in npc_result.scalars()}
-    media_keys=("home_bg","hero_bg","house_bg","treasury","shop","development","factions","map","games_bg","icon_hero","icon_house","icon_treasury","icon_shop","icon_map","icon_games","icon_factions","icon_inventory")
+    media_keys=("home_bg","hero_bg","house_bg","treasury","shop","development","factions","map","games_bg","inventory_bg","loading_bg","app_logo","topbar_bg","nav_bg","card_texture","frame_hero","frame_house","icon_hero","icon_house","icon_treasury","icon_shop","icon_map","icon_games","icon_factions","icon_inventory","icon_development","icon_daily")
     media={k:(f"/api/miniapp/media/{k}" if await get_system_media(session,k) else None) for k in media_keys}
     remaining=0
     if c.work_ends_at and not c.work_reward_claimed:
@@ -155,8 +172,11 @@ async def daily_reward(
 async def miniapp_media(key: str):
     allowed = {
         "home_bg","hero_bg","house_bg","treasury","shop","development",
-        "factions","map","games_bg","icon_hero","icon_house","icon_treasury",
-        "icon_shop","icon_map","icon_games","icon_factions","icon_inventory",
+        "factions","map","games_bg","inventory_bg","loading_bg","app_logo",
+        "topbar_bg","nav_bg","card_texture","frame_hero","frame_house",
+        "icon_hero","icon_house","icon_treasury","icon_shop","icon_map",
+        "icon_games","icon_factions","icon_inventory","icon_development",
+        "icon_daily",
     }
     if key not in allowed:
         raise HTTPException(404, "Изображение не найдено")
@@ -166,16 +186,27 @@ async def miniapp_media(key: str):
     if not file_id:
         raise HTTPException(404, "Изображение не загружено")
 
-    from app.config import get_settings
-    bot = Bot(get_settings().bot_token)
-    try:
-        file = await bot.get_file(file_id)
-        stream = BytesIO()
-        await bot.download_file(file.file_path, destination=stream)
-        return Response(
-            content=stream.getvalue(),
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, max-age=3600"},
-        )
-    finally:
-        await bot.session.close()
+    return await telegram_file_response(file_id)
+
+
+
+@router.get("/hero-image")
+async def hero_image(
+    user: TelegramMiniAppUser = Depends(current_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character = await require_character(user, session)
+    if not character.portrait_file_id:
+        raise HTTPException(404, "Портрет персонажа не загружен")
+    return await telegram_file_response(character.portrait_file_id)
+
+
+@router.get("/house-image")
+async def house_image(
+    user: TelegramMiniAppUser = Depends(current_miniapp_user),
+    session: AsyncSession = Depends(get_session),
+):
+    character = await require_character(user, session)
+    if not character.house or not character.house.image_file_id:
+        raise HTTPException(404, "Фотография дома не загружена")
+    return await telegram_file_response(character.house.image_file_id)

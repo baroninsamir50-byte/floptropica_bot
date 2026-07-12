@@ -7,7 +7,11 @@ if (tg) {
   tg.setBackgroundColor?.("#0c0814");
 }
 
-const state = { data: null, view: "home" };
+const state = {
+  data: null,
+  view: "home",
+  protectedImages: new Map()
+};
 const $ = id => document.getElementById(id);
 const content = $("content");
 const initData = tg?.initData || "";
@@ -48,6 +52,54 @@ async function api(path, options = {}) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.detail || "Ошибка сервера");
   return body;
+}
+
+
+async function protectedImage(path) {
+  if (state.protectedImages.has(path)) {
+    return state.protectedImages.get(path);
+  }
+  const response = await fetch(`/api/miniapp${path}`, {
+    headers: { "X-Telegram-Init-Data": initData }
+  });
+  if (!response.ok) return null;
+  const url = URL.createObjectURL(await response.blob());
+  state.protectedImages.set(path, url);
+  return url;
+}
+
+async function hydrateProtectedImages() {
+  const nodes = [...document.querySelectorAll("[data-protected-image]")];
+  await Promise.all(nodes.map(async node => {
+    const url = await protectedImage(node.dataset.protectedImage);
+    if (url) {
+      node.src = url;
+      node.classList.remove("image-loading");
+    } else {
+      node.closest(".portrait-stage, .house-photo-stage")?.classList.add("image-missing");
+    }
+  }));
+}
+
+function applyThemeMedia() {
+  const media = state.data?.media || {};
+  const root = document.documentElement;
+  const setImage = (name, key) => {
+    root.style.setProperty(name, media[key] ? `url("${media[key]}")` : "none");
+  };
+
+  setImage("--theme-card-texture", "card_texture");
+  setImage("--theme-topbar-bg", "topbar_bg");
+  setImage("--theme-nav-bg", "nav_bg");
+  setImage("--theme-loading-bg", "loading_bg");
+
+  const logo = $("loadingLogo");
+  const emoji = $("loadingEmoji");
+  if (media.app_logo && logo) {
+    logo.src = media.app_logo;
+    logo.classList.remove("hidden");
+    emoji?.classList.add("hidden");
+  }
 }
 
 const statLabels = {
@@ -110,8 +162,8 @@ function homeView() {
 
       <div class="panel reward-panel">
         <div>
-          <div class="eyebrow">ЕЖЕДНЕВНЫЙ ПОДАРОК</div>
-          <h3>Серия входов: ${h.login_streak} дн.</h3>
+          <div class="reward-title">${visualIcon("icon_daily", "🎁")}<div><div class="eyebrow">ЕЖЕДНЕВНЫЙ ПОДАРОК</div>
+          <h3>Серия входов: ${h.login_streak} дн.</h3></div></div>
           <p class="muted">На 7-й день дополнительно выдаются очки развития.</p>
         </div>
         <button class="btn gold" onclick="claimDaily()" ${h.daily_reward_available ? "" : "disabled"}>
@@ -145,25 +197,36 @@ function heroView() {
     </div>`).join("");
 
   return section("👤 Герой", `
-    <div class="panel media-panel" ${bgStyle("hero_bg")}>
-      <div class="eyebrow">ЛИЧНАЯ КАРТОЧКА</div>
-      <h2>${h.name}</h2>
-      <p>
-        <span class="badge">${h.title}</span>
-        <span class="badge">${h.faction}</span>
-        <span class="badge">${h.rank}</span>
-      </p>
-      <div class="row">
-        <span>💹 Бонус дохода уровня</span>
-        <b>+${Math.round((h.income_multiplier - 1) * 100)}%</b>
+    <div class="hero-profile-layout">
+      <div class="portrait-stage" ${bgStyle("hero_bg")}>
+        <img
+          class="hero-portrait image-loading"
+          data-protected-image="/hero-image"
+          alt="Портрет ${h.name}">
+        ${mediaUrl("frame_hero") ? `<img class="decorative-frame" src="${mediaUrl("frame_hero")}" alt="">` : ""}
+        <div class="portrait-shine"></div>
       </div>
-      <div class="stat">
-        <div class="stat-head">
-          <span>Уровень ${h.level}</span>
-          <b>${h.experience}/${h.experience_next} XP</b>
+
+      <div class="panel hero-info-panel">
+        <div class="eyebrow">ЛИЧНАЯ КАРТОЧКА</div>
+        <h2>${h.name}</h2>
+        <p>
+          <span class="badge">${h.title}</span>
+          <span class="badge">${h.faction}</span>
+          <span class="badge">${h.rank}</span>
+        </p>
+        <div class="row">
+          <span>💹 Бонус дохода уровня</span>
+          <b>+${Math.round((h.income_multiplier - 1) * 100)}%</b>
         </div>
-        <div class="bar">
-          <i style="width:${Math.min(100, h.experience / h.experience_next * 100)}%"></i>
+        <div class="stat">
+          <div class="stat-head">
+            <span>Уровень ${h.level}</span>
+            <b>${h.experience}/${h.experience_next} XP</b>
+          </div>
+          <div class="bar">
+            <i style="width:${Math.min(100, h.experience / h.experience_next * 100)}%"></i>
+          </div>
         </div>
       </div>
     </div>
@@ -193,10 +256,17 @@ function houseView() {
   }
 
   return section("🏰 Владение", `
-    <div class="hero-banner" ${bgStyle("house_bg")}>
-      <div class="eyebrow">ЛИЧНОЕ ВЛАДЕНИЕ</div>
-      <h2>${h.name}</h2>
-      <p>${h.location}</p>
+    <div class="house-photo-stage" ${bgStyle("house_bg")}>
+      <img
+        class="house-photo image-loading"
+        data-protected-image="/house-image"
+        alt="${h.name}">
+      ${mediaUrl("frame_house") ? `<img class="decorative-frame house-frame" src="${mediaUrl("frame_house")}" alt="">` : ""}
+      <div class="house-photo-caption">
+        <div class="eyebrow">ЛИЧНОЕ ВЛАДЕНИЕ</div>
+        <h2>${h.name}</h2>
+        <p>${h.location}</p>
+      </div>
     </div>
 
     <div class="panel">
@@ -214,7 +284,7 @@ function houseView() {
         <div class="bar"><i style="width:${h.integrity}%"></i></div>
       </div>
 
-      <p class="muted">Фотография дома открывается через команду /house.</p>
+      
     </div>`);
 }
 
@@ -310,7 +380,7 @@ function inventoryView() {
       </div>`).join("")
     : `<div class="panel muted">Инвентарь пуст</div>`;
 
-  return section("🎒 Снаряжение", `<div class="cards">${items}</div>`);
+  return section("🎒 Снаряжение", `<div class="panel media-panel inventory-cover" ${bgStyle("inventory_bg")}><p>Арсенал и магические предметы персонажа.</p></div><div class="cards">${items}</div>`);
 }
 
 function mapView() {
@@ -364,7 +434,7 @@ function gamesView() {
 function moreView() {
   return section("✨ Разделы", `
     <div class="quick-grid">
-      ${quick("🏋", "Развитие", "Распределить очки", "development")}
+      ${quick("🏋", "Развитие", "Распределить очки", "development", "icon_development")}
       ${quick("🛒", "Магазин", "Товары дня", "shop")}
       ${quick("🎒", "Инвентарь", "Экипировка", "inventory")}
       ${quick("🗺", "Карта", "Земли Королевства", "map")}
@@ -419,6 +489,7 @@ window.go = view => {
 
 async function refresh() {
   state.data = await api("/bootstrap");
+  applyThemeMedia();
   $("heroName").textContent = state.data.hero.name;
   $("gold").textContent = state.data.hero.gold;
   render();

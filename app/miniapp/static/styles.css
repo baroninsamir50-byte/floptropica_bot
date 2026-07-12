@@ -14,6 +14,10 @@
   --red: #ff6f88;
   --line: rgba(245, 204, 107, 0.16);
   --shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
+  --theme-card-texture: none;
+  --theme-topbar-bg: none;
+  --theme-nav-bg: none;
+  --theme-loading-bg: none;
 }
 
 * {
@@ -32,7 +36,11 @@ body {
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background:
     radial-gradient(circle at 50% -20%, rgba(154, 108, 255, 0.2), transparent 40%),
+    var(--theme-loading-bg),
     linear-gradient(180deg, var(--bg-1), var(--bg-2));
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
   overflow-x: hidden;
 }
 
@@ -633,4 +641,180 @@ button {
 
 .reward-panel h3 {
   margin: 5px 0;
+}
+
+
+.topbar {
+  background-image:
+    linear-gradient(rgba(18,13,29,.76), rgba(18,13,29,.76)),
+    var(--theme-topbar-bg);
+  background-size: cover;
+  background-position: center;
+}
+
+.bottom-nav {
+  background-image:
+    linear-gradient(rgba(18,13,29,.9), rgba(18,13,29,.9)),
+    var(--theme-nav-bg);
+  background-size: cover;
+  background-position: center;
+}
+
+.panel,
+.card,
+.quick-card {
+  background-image:
+    linear-gradient(145deg, rgba(255,255,255,.06), rgba(255,255,255,.018)),
+    var(--theme-card-texture);
+  background-size: cover;
+  background-position: center;
+}
+
+.loading-logo {
+  width: 82px;
+  height: 82px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 24px rgba(245,204,107,.5));
+  animation: crownPulse 2.2s ease-in-out infinite;
+}
+
+.hero-profile-layout {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.portrait-stage,
+.house-photo-stage {
+  position: relative;
+  overflow: hidden;
+  border-radius: 28px;
+  border: 1px solid rgba(245,204,107,.25);
+  background:
+    radial-gradient(circle at 50% 15%, rgba(154,108,255,.28), transparent 40%),
+    linear-gradient(135deg,#291a40,#0c0814);
+  background-size: cover;
+  background-position: center;
+  box-shadow: var(--shadow);
+}
+
+.portrait-stage {
+  aspect-ratio: 4 / 5;
+  min-height: 390px;
+}
+
+.hero-portrait,
+.house-photo {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  opacity: 1;
+  transition: opacity .35s ease, transform .5s ease;
+}
+
+.hero-portrait:hover,
+.house-photo:hover {
+  transform: scale(1.025);
+}
+
+.image-loading {
+  opacity: 0;
+}
+
+.portrait-stage.image-missing::after,
+.house-photo-stage.image-missing::after {
+  content: "Изображение не загружено";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.decorative-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.house-frame {
+  z-index: 4;
+}
+
+.portrait-shine {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(115deg, transparent 25%, rgba(255,255,255,.12), transparent 55%);
+  transform: translateX(-110%);
+  animation: portraitShimmer 7s ease-in-out infinite;
+}
+
+.hero-info-panel {
+  margin-bottom: 0;
+}
+
+.house-photo-stage {
+  aspect-ratio: 16 / 10;
+  margin-bottom: 14px;
+  min-height: 240px;
+}
+
+.house-photo-caption {
+  position: absolute;
+  z-index: 3;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 28px 20px 18px;
+  background: linear-gradient(transparent, rgba(7,4,12,.92));
+}
+
+.house-photo-caption h2 {
+  margin: 3px 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+}
+
+.house-photo-caption p {
+  margin: 0;
+  color: #ded2ef;
+}
+
+.reward-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.reward-title .custom-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.inventory-cover {
+  min-height: 140px;
+  display: flex;
+  align-items: flex-end;
+}
+
+@keyframes portraitShimmer {
+  0%, 55% { transform: translateX(-110%); }
+  75%, 100% { transform: translateX(110%); }
+}
+
+@media (min-width: 680px) {
+  .hero-profile-layout {
+    grid-template-columns: minmax(260px, .85fr) minmax(300px, 1.15fr);
+    align-items: stretch;
+  }
+
+  .portrait-stage {
+    min-height: 460px;
+  }
 }

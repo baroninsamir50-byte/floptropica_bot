@@ -238,6 +238,14 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         ("🚩 Фон фракций", "factions"),
         ("🗺 Карта Королевства", "map"),
         ("🎲 Фон игровой арены", "games_bg"),
+        ("🎒 Фон инвентаря", "inventory_bg"),
+        ("🌌 Фон загрузки", "loading_bg"),
+        ("👑 Эмблема приложения", "app_logo"),
+        ("🔝 Фон верхней панели", "topbar_bg"),
+        ("🔻 Фон нижнего меню", "nav_bg"),
+        ("🧱 Текстура карточек", "card_texture"),
+        ("🖼 Рамка героя", "frame_hero"),
+        ("🏛 Рамка владения", "frame_house"),
         ("👤 Иконка героя", "icon_hero"),
         ("🏰 Иконка дома", "icon_house"),
         ("💰 Иконка казны", "icon_treasury"),
@@ -246,6 +254,8 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         ("🎲 Иконка игр", "icon_games"),
         ("🚩 Иконка фракций", "icon_factions"),
         ("🎒 Иконка инвентаря", "icon_inventory"),
+        ("🏋 Иконка развития", "icon_development"),
+        ("🎁 Иконка подарка", "icon_daily"),
     ]
     rows = [
         [InlineKeyboardButton(text=label, callback_data=f"adminmedia:{key}")]
