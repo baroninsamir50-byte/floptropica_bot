@@ -133,6 +133,63 @@ function bgStyle(key) {
   return url ? `style="background-image:linear-gradient(180deg,rgba(8,5,15,.22),rgba(8,5,15,.9)),url('${url}')"` : "";
 }
 
+
+function openUpload(kind) {
+  const username = state.data?.bot_username;
+  if (!username) {
+    toast("Не удалось определить имя бота");
+    return;
+  }
+  const payload = kind === "house" ? "upload_house" : "upload_portrait";
+  tg?.openTelegramLink?.(`https://t.me/${username}?start=${payload}`);
+}
+
+function showStreakInfo() {
+  tg?.showPopup?.({
+    title: "Серия входов",
+    message: "Заходите в игру каждый день. На 7-й день дополнительно выдаются очки развития.",
+    buttons: [{ type: "ok", text: "Понятно" }]
+  });
+}
+
+window.openImageViewer = url => {
+  if (!url) {
+    toast("Изображение ещё не загружено");
+    return;
+  }
+  $("viewerImage").src = url;
+  $("imageViewer").classList.remove("hidden");
+  document.body.classList.add("viewer-open");
+};
+
+window.closeImageViewer = () => {
+  $("imageViewer").classList.add("hidden");
+  $("viewerImage").src = "";
+  document.body.classList.remove("viewer-open");
+};
+
+function applyActiveScreenBackground() {
+  const keyByView = {
+    home: "home_bg",
+    hero: "hero_bg",
+    house: "house_bg",
+    treasury: "treasury",
+    shop: "shop",
+    development: "development",
+    factions: "factions",
+    map: "map",
+    games: "games_bg",
+    inventory: "inventory_bg",
+    more: "home_bg"
+  };
+  const url = mediaUrl(keyByView[state.view]);
+  document.documentElement.style.setProperty(
+    "--active-screen-bg",
+    url ? `url("${url}")` : "none"
+  );
+  document.body.classList.toggle("home-screen", state.view === "home");
+}
+
 function quick(icon, title, subtitle, view, mediaKey=null) {
   return `
     <button class="quick-card" onclick="go('${view}')">
@@ -160,15 +217,20 @@ function homeView() {
         </div>
       </section>
 
-      <div class="panel reward-panel">
-        <div>
-          <div class="reward-title">${visualIcon("icon_daily", "🎁")}<div><div class="eyebrow">ЕЖЕДНЕВНЫЙ ПОДАРОК</div>
-          <h3>Серия входов: ${h.login_streak} дн.</h3></div></div>
-          <p class="muted">На 7-й день дополнительно выдаются очки развития.</p>
+      <div class="compact-reward">
+        <div class="reward-mini">
+          ${visualIcon("icon_daily", "🎁")}
+          <div>
+            <b>Ежедневная награда</b>
+            <small>Серия: ${h.login_streak} дн.</small>
+          </div>
         </div>
-        <button class="btn gold" onclick="claimDaily()" ${h.daily_reward_available ? "" : "disabled"}>
-          ${h.daily_reward_available ? "Забрать" : "Уже получено"}
-        </button>
+        <div class="reward-actions">
+          <button class="info-btn" onclick="showStreakInfo()" aria-label="Что такое серия входов">i</button>
+          <button class="btn gold reward-claim" onclick="claimDaily()" ${h.daily_reward_available ? "" : "disabled"}>
+            ${h.daily_reward_available ? "Получить" : "Получено"}
+          </button>
+        </div>
       </div>
 
       <div class="quick-grid">
@@ -199,10 +261,19 @@ function heroView() {
   return section("👤 Герой", `
     <div class="hero-profile-layout">
       <div class="portrait-stage" ${bgStyle("hero_bg")}>
-        <img
-          class="hero-portrait image-loading"
-          data-protected-image="/hero-image"
-          alt="Портрет ${h.name}">
+        ${h.portrait_available ? `
+          <img
+            class="hero-portrait image-loading"
+            data-protected-image="/hero-image"
+            alt="Портрет ${h.name}">
+        ` : `
+          <div class="upload-placeholder">
+            <div class="upload-symbol">👤</div>
+            <h3>Портрет не загружен</h3>
+            <p>Добавьте фотографию персонажа через личный чат с ботом.</p>
+            <button class="btn gold" onclick="openUpload('portrait')">Загрузить</button>
+          </div>
+        `}
         ${mediaUrl("frame_hero") ? `<img class="decorative-frame" src="${mediaUrl("frame_hero")}" alt="">` : ""}
         <div class="portrait-shine"></div>
       </div>
@@ -257,10 +328,19 @@ function houseView() {
 
   return section("🏰 Владение", `
     <div class="house-photo-stage" ${bgStyle("house_bg")}>
-      <img
-        class="house-photo image-loading"
-        data-protected-image="/house-image"
-        alt="${h.name}">
+      ${h.image_available ? `
+        <img
+          class="house-photo image-loading"
+          data-protected-image="/house-image"
+          alt="${h.name}">
+      ` : `
+        <div class="upload-placeholder house-upload">
+          <div class="upload-symbol">🏰</div>
+          <h3>Фото владения не загружено</h3>
+          <p>Добавьте изображение дома через личный чат с ботом.</p>
+          <button class="btn gold" onclick="openUpload('house')">Загрузить</button>
+        </div>
+      `}
       ${mediaUrl("frame_house") ? `<img class="decorative-frame house-frame" src="${mediaUrl("frame_house")}" alt="">` : ""}
       <div class="house-photo-caption">
         <div class="eyebrow">ЛИЧНОЕ ВЛАДЕНИЕ</div>
@@ -330,19 +410,22 @@ function treasuryView() {
     </div>`).join("");
 
   return section("💰 Казна", `
-    <div class="panel media-panel" ${bgStyle("treasury")}>
-      <div class="eyebrow">КОРОЛЕВСКАЯ СЛУЖБА</div>
-      <div class="row"><span>Профессия</span><b>${d.hero.profession}</b></div>
-      <div class="row"><span>Смены сегодня</span><b>${work.count}/2</b></div>
-      <div class="row"><span>Статус</span><b>${work.active ? "Работа идёт" : "Свободен"}</b></div>
-
-      <div class="action-grid">
-        <button class="btn gold" onclick="startWork()">Начать смену</button>
-        <button class="btn secondary" onclick="claimWork()">Получить награду</button>
+    <div class="section-visual-large treasury-visual" ${bgStyle("treasury")}>
+      <div class="visual-overlay">
+        <div class="eyebrow">КОРОЛЕВСКАЯ СЛУЖБА</div>
+        <div class="compact-meta">
+          <span>${d.hero.profession}</span>
+          <span>${work.count}/2 смен</span>
+          <span>${work.active ? "Работа идёт" : "Свободен"}</span>
+        </div>
+        <div class="action-grid">
+          <button class="btn gold" onclick="startWork()">Начать смену</button>
+          <button class="btn secondary" onclick="claimWork()">Получить награду</button>
+        </div>
       </div>
     </div>
 
-    <div class="cards">${professions}</div>`);
+    <div class="cards profession-list">${professions}</div>`);
 }
 
 function shopView() {
@@ -360,7 +443,14 @@ function shopView() {
     </div>`).join("");
 
   return section(`🛒 Магазин дня · ${state.data.shop.date}`,
-    `<div class="panel media-panel" ${bgStyle("shop")}><p>Магический ассортимент обновляется ежедневно. Свиток +30 очков развития доступен каждый день.</p></div><div class="cards">${items}</div>`);
+    `<div class="section-visual-large shop-visual" ${bgStyle("shop")}>
+      <div class="visual-overlay">
+        <div class="eyebrow">МАГАЗИН ДНЯ</div>
+        <h3>Магический ассортимент</h3>
+        <p>Свиток +30 очков развития доступен ежедневно.</p>
+      </div>
+    </div>
+    <div class="cards shop-list">${items}</div>`);
 }
 
 function inventoryView() {
@@ -384,14 +474,19 @@ function inventoryView() {
 }
 
 function mapView() {
+  const mapUrl = mediaUrl("map");
   return section("🗺 Карта Королевства", `
-    <div class="hero-banner" ${bgStyle("map")}>
-      <div class="eyebrow">ЗЕМЛИ ФЛОПТРОПИКИ</div>
-      <h2>Карта Королевства</h2>
-      <p>Города, владения, фракции и магические области.</p>
-    </div>
-    <div class="panel">
-      <p>Полное изображение карты открывается командой /map в боте.</p>
+    <div class="map-stage ${mapUrl ? "" : "map-empty"}">
+      ${mapUrl ? `
+        <img class="map-image" src="${mapUrl}" alt="Карта Королевства">
+        <button class="map-expand-btn" onclick="openImageViewer('${mapUrl}')">⛶ Открыть полностью</button>
+      ` : `
+        <div class="upload-placeholder">
+          <div class="upload-symbol">🗺</div>
+          <h3>Карта ещё не загружена</h3>
+          <p>Создатель может добавить карту через панель администратора.</p>
+        </div>
+      `}
     </div>`);
 }
 
@@ -458,28 +553,19 @@ function render() {
     more: moreView
   };
 
+  applyActiveScreenBackground();
   content.innerHTML = (views[state.view] || homeView)();
+  hydrateProtectedImages();
 
-  
-
-window.claimDaily = async () => {
-  try {
-    const result = await api("/daily-reward", { method: "POST" });
-    const extra = result.development ? ` и ${result.development} очков развития` : "";
-    toast(`Получено ${result.gold} золота, ${result.xp} XP${extra}`);
-    await refresh();
-    go("home");
-  } catch (error) {
-    toast(error.message);
-  }
-};
-
-document.querySelectorAll(".bottom-nav button").forEach(button => {
+  document.querySelectorAll(".bottom-nav button").forEach(button => {
     button.classList.toggle("active", button.dataset.view === state.view);
   });
 
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
+
+window.openUpload = openUpload;
+window.showStreakInfo = showStreakInfo;
 
 window.go = view => {
   state.view = view;
@@ -573,12 +659,12 @@ window.equip = async inventoryId => {
   }
 };
 
-
-
 window.claimDaily = async () => {
   try {
     const result = await api("/daily-reward", { method: "POST" });
-    const extra = result.development ? ` и ${result.development} очков развития` : "";
+    const extra = result.development
+      ? ` и ${result.development} очков развития`
+      : "";
     toast(`Получено ${result.gold} золота, ${result.xp} XP${extra}`);
     await refresh();
     go("home");
@@ -589,6 +675,10 @@ window.claimDaily = async () => {
 
 document.querySelectorAll(".bottom-nav button").forEach(button => {
   button.addEventListener("click", () => go(button.dataset.view));
+});
+
+$("imageViewer")?.addEventListener("click", event => {
+  if (event.target.id === "imageViewer") closeImageViewer();
 });
 
 (async () => {
@@ -602,7 +692,7 @@ document.querySelectorAll(".bottom-nav button").forEach(button => {
     setTimeout(() => {
       $("loading").classList.add("hidden");
       $("app").classList.remove("hidden");
-    }, 550);
+    }, 420);
   } catch (error) {
     $("loading").innerHTML = `
       <div class="portal">

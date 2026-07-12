@@ -20,6 +20,23 @@ async def start(message: Message, state: FSMContext, session: AsyncSession) -> N
         await message.answer(f"Регистрация проходит в личном чате: https://t.me/{me.username}?start=register")
         return
     exists = await session.scalar(select(User.id).where(User.telegram_id == message.from_user.id))
+    payload = (message.text or "").split(maxsplit=1)
+    payload = payload[1].strip() if len(payload) > 1 else ""
+
+    if exists and payload == "upload_portrait":
+        from app.states import ChangePortrait
+        await state.clear()
+        await state.set_state(ChangePortrait.photo)
+        await message.answer("📸 Отправьте новую фотографию персонажа.")
+        return
+
+    if exists and payload == "upload_house":
+        from app.states import ChangeHousePhoto
+        await state.clear()
+        await state.set_state(ChangeHousePhoto.photo)
+        await message.answer("🏰 Отправьте новую фотографию вашего владения.")
+        return
+
     if exists:
         await message.answer(
             "С возвращением в Королевство Флоптропика!",

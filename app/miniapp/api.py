@@ -20,6 +20,21 @@ from app.services import (
 from app.work_catalog import available_professions, profession_by_key, title_can_use
 
 router = APIRouter(prefix="/api/miniapp", tags=["miniapp"])
+_bot_username_cache: str | None = None
+
+async def get_bot_username() -> str | None:
+    global _bot_username_cache
+    if _bot_username_cache:
+        return _bot_username_cache
+    from app.config import get_settings
+    bot = Bot(get_settings().bot_token)
+    try:
+        me = await bot.get_me()
+        _bot_username_cache = me.username
+        return _bot_username_cache
+    finally:
+        await bot.session.close()
+
 
 async def get_session():
     async with SessionFactory() as session:
@@ -85,17 +100,22 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
     remaining=0
     if c.work_ends_at and not c.work_reward_claimed:
         remaining=max(0,int((c.work_ends_at-datetime.now(timezone.utc)).total_seconds()))
+    bot_username = await get_bot_username()
     return {
+        "bot_username": bot_username,
         "hero":{"name":c.name,"level":c.level,"experience":c.experience,"experience_next":xp_for_next(c.level),
         "gold":c.gold,"profession":c.profession,"title":c.title,"faction":c.faction,"social_status":c.social_status,
         "reputation":c.reputation,"development_points":c.development_points,
+        "portrait_available": bool(c.portrait_file_id),
         "rank":level_rank(c.level),"income_multiplier":round(level_income_multiplier(c.level),2),
         "login_streak":c.login_streak,"daily_reward_available":c.daily_reward_date != local_date(),
         "stats":{k:total(k) for k in ("health","mana","strength","intelligence","agility","magic","luck","endurance","charisma")}},
         "house":{"name":c.house.name if c.house else None,"location":c.house.location if c.house else None,
         "description":c.house.description if c.house else None,"level":c.house.level if c.house else None,
         "value":c.house.value if c.house else None,"defense":c.house.defense if c.house else None,
-        "integrity":c.house.integrity if c.house else None,"repair_energy":c.house.repair_energy if c.house else None},
+        "integrity":c.house.integrity if c.house else None,
+        "repair_energy":c.house.repair_energy if c.house else None,
+        "image_available": bool(c.house and c.house.image_file_id)},
         "work":{"count":c.work_count,"active":bool(c.work_ends_at and not c.work_reward_claimed),"remaining_seconds":remaining},
         "professions":[{"key":k,"name":str(d["name"]),"label":str(d["label"]),"gold":list(d["gold"]),"xp":list(d["xp"])}
             for k,d in available_professions(c.title)],
