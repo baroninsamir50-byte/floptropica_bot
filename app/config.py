@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     house_attack_hour: int = 18
     house_attacks_enabled: bool = True
     cron_secret: str = ""
+    webapp_url: str = ""
+    miniapp_auth_max_age: int = 86400
+    game_chat_id: int = 0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

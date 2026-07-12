@@ -15,6 +15,7 @@ from app.keyboards import (
 from app.models import Character, Duel, Expedition, ExpeditionMember, ExpeditionVote, User
 from app.services import (
     apply_levels, change_gold, get_character, get_effective_stats, percent_bonus,
+    level_income_multiplier,
 )
 
 router = Router()
@@ -207,14 +208,17 @@ async def finish_duel(callback, session, duel, winner, loser, reason):
     duel.status = "finished"
     duel.winner_id = winner.id
     duel.finished_at = datetime.now(timezone.utc)
-    await change_gold(session, winner, 3, "duel_win")
-    winner.experience += 20
-    loser.experience += 5
+    duel_gold = max(3, int(3 * level_income_multiplier(winner.level)))
+    duel_xp = 20 + winner.level // 2
+    await change_gold(session, winner, duel_gold, "duel_win")
+    winner.experience += duel_xp
+    loser.experience += 5 + loser.level // 5
     apply_levels(winner)
     apply_levels(loser)
     await callback.message.edit_text(
         f"🏆 <b>{winner.name}</b> побеждает!\nПричина: {reason}\n\n"
-        "Победитель получает 3 🪙 и 20 XP. Проигравший получает 5 XP."
+        f"Победитель получает {duel_gold} 🪙 и {duel_xp} XP. "
+        "Награда увеличивается с уровнем."
     )
 
 
@@ -458,13 +462,15 @@ async def finish_exp(message, session, exp, success):
     exp.status = "finished"
     exp.finished_at = datetime.now(timezone.utc)
     if success:
-        reward = max(1, exp.treasure // len(rows))
+        base_reward = max(1, exp.treasure // len(rows))
         lines = []
         for _, char in rows:
+            reward = max(1, int(base_reward * level_income_multiplier(char.level)))
+            xp_reward = 25 + char.level // 3
             await change_gold(session, char, reward, "expedition_reward")
-            char.experience += 25
+            char.experience += xp_reward
             apply_levels(char)
-            lines.append(f"• {char.name}: {reward} 🪙 и 25 XP")
+            lines.append(f"• {char.name}: {reward} 🪙 и {xp_reward} XP")
         await message.edit_text("🏆 <b>Лабиринт пройден!</b>\n\n" + "\n".join(lines))
     else:
         for _, char in rows:

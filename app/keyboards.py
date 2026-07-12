@@ -162,10 +162,21 @@ def house_panel_keyboard(active_attack_id: int | None = None) -> InlineKeyboardM
 def house_attack_keyboard(attack_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="⚔ Сражаться самому", callback_data=f"housefight:{attack_id}"),
-            InlineKeyboardButton(text="👮 Отправить стражу", callback_data=f"houseguards:{attack_id}"),
+            InlineKeyboardButton(
+                text="🏰 Владелец защищает",
+                callback_data=f"housefight:{attack_id}",
+            ),
         ],
-        [InlineKeyboardButton(text="🏰 Открыть панель дома", callback_data="house:defense")],
+        [
+            InlineKeyboardButton(
+                text="🤝 Помочь другу",
+                callback_data=f"househelp:{attack_id}",
+            ),
+            InlineKeyboardButton(
+                text="👮 Отправить стражу",
+                callback_data=f"houseguards:{attack_id}",
+            ),
+        ],
     ])
 
 
@@ -217,15 +228,31 @@ def admin_attack_players_keyboard(players: list[tuple[int, str]]) -> InlineKeybo
 
 
 def admin_media_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛒 Фото магазина дня", callback_data="adminmedia:shop")],
-        [InlineKeyboardButton(text="💰 Фото казны", callback_data="adminmedia:treasury")],
-        [InlineKeyboardButton(text="🏋 Фото развития", callback_data="adminmedia:development")],
-        [InlineKeyboardButton(text="🚩 Фото фракций", callback_data="adminmedia:factions")],
-        [InlineKeyboardButton(text="🗺 Карта Королевства", callback_data="adminmedia:map")],
-        [InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")],
-    ])
-
+    media = [
+        ("🏛 Фон главной", "home_bg"),
+        ("👤 Фон героя", "hero_bg"),
+        ("🏰 Фон владения", "house_bg"),
+        ("💰 Фон казны", "treasury"),
+        ("🛒 Фон магазина", "shop"),
+        ("🏋 Фон развития", "development"),
+        ("🚩 Фон фракций", "factions"),
+        ("🗺 Карта Королевства", "map"),
+        ("🎲 Фон игровой арены", "games_bg"),
+        ("👤 Иконка героя", "icon_hero"),
+        ("🏰 Иконка дома", "icon_house"),
+        ("💰 Иконка казны", "icon_treasury"),
+        ("🛒 Иконка магазина", "icon_shop"),
+        ("🗺 Иконка карты", "icon_map"),
+        ("🎲 Иконка игр", "icon_games"),
+        ("🚩 Иконка фракций", "icon_factions"),
+        ("🎒 Иконка инвентаря", "icon_inventory"),
+    ]
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"adminmedia:{key}")]
+        for label, key in media
+    ]
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def development_keyboard() -> InlineKeyboardMarkup:

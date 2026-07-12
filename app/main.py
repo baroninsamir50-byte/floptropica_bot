@@ -5,12 +5,15 @@ import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats,
+    MenuButtonWebApp, WebAppInfo,
+)
 
 from app.config import get_settings
 from app.database import init_database, SessionFactory
 from app.middlewares import DatabaseMiddleware
-from app.routers import admin, common, economy, gameplay, games, house_defense, profile, registration
+from app.routers import admin, common, economy, gameplay, games, house_defense, miniapp, profile, registration
 from app.services import seed_items
 from app.scheduler import house_attack_loop, process_due_game_tasks
 
@@ -42,6 +45,7 @@ async def run_bot() -> None:
     dp.include_router(economy.router)
     dp.include_router(games.router)
     dp.include_router(house_defense.router)
+    dp.include_router(miniapp.router)
     dp.include_router(admin.router)
     dp.include_router(common.router)
 
@@ -49,10 +53,12 @@ async def run_bot() -> None:
     private_commands = [
         BotCommand(command="start", description="Создать персонажа"),
         BotCommand(command="menu", description="Главное меню"),
+        BotCommand(command="app", description="Открыть Mini App"),
         BotCommand(command="profile", description="Карточка героя"),
         BotCommand(command="house", description="Моё владение"),
         BotCommand(command="map", description="Карта Королевства"),
         BotCommand(command="shop", description="Магазин дня"),
+        BotCommand(command="daily", description="Ежедневный подарок"),
         BotCommand(command="work", description="Начать работу"),
         BotCommand(command="work_status", description="Получить награду"),
         BotCommand(command="games", description="Игровая арена"),
@@ -75,6 +81,13 @@ async def run_bot() -> None:
     ]
     await bot.set_my_commands(private_commands, scope=BotCommandScopeAllPrivateChats())
     await bot.set_my_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+    if settings.webapp_url:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="🎮 Открыть Королевство",
+                web_app=WebAppInfo(url=settings.webapp_url.rstrip("/") + "/miniapp"),
+            )
+        )
 
     try:
         await process_due_game_tasks(bot)

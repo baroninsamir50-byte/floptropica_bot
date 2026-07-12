@@ -16,6 +16,10 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: GAME_CHAT_ID
+        sync: false
       - key: TIMEZONE
         value: Europe/Amsterdam
       - key: DATABASE_URL

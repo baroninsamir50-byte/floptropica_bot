@@ -24,6 +24,11 @@ async def init_database() -> None:
             "ALTER TABLE expeditions ADD COLUMN IF NOT EXISTS party_mana INTEGER NOT NULL DEFAULT 50",
             "ALTER TABLE characters ADD COLUMN IF NOT EXISTS development_points INTEGER NOT NULL DEFAULT 100",
             "ALTER TABLE characters ADD COLUMN IF NOT EXISTS work_profession VARCHAR(100)",
+            "ALTER TABLE characters ADD COLUMN IF NOT EXISTS development_pack_date VARCHAR(10)",
+            "ALTER TABLE characters ADD COLUMN IF NOT EXISTS daily_reward_date VARCHAR(10)",
+            "ALTER TABLE characters ADD COLUMN IF NOT EXISTS login_streak INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE house_attacks ADD COLUMN IF NOT EXISTS defender_character_id INTEGER REFERENCES characters(id)",
+            "ALTER TABLE house_attacks ADD COLUMN IF NOT EXISTS helped_by_friend BOOLEAN NOT NULL DEFAULT FALSE",
         ]
         for statement in upgrades:
             await connection.execute(text(statement))

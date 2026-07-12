@@ -38,11 +38,23 @@ ROLE_DATA = {
 }
 
 MEDIA_NAMES = {
-    "shop": "магазина дня",
-    "treasury": "казны",
-    "development": "развития",
-    "factions": "фракций",
+    "home_bg": "фона главной страницы",
+    "hero_bg": "фона карточки героя",
+    "house_bg": "фона владения",
+    "treasury": "фона казны",
+    "shop": "фона магазина дня",
+    "development": "фона развития",
+    "factions": "фона фракций",
     "map": "карты Королевства",
+    "games_bg": "фона игровой арены",
+    "icon_hero": "иконки героя",
+    "icon_house": "иконки дома",
+    "icon_treasury": "иконки казны",
+    "icon_shop": "иконки магазина",
+    "icon_map": "иконки карты",
+    "icon_games": "иконки игр",
+    "icon_factions": "иконки фракций",
+    "icon_inventory": "иконки инвентаря",
 }
 
 
@@ -299,15 +311,18 @@ async def admin_force_attack(
     session.add(attack)
     await session.flush()
 
-    try:
-        await callback.bot.send_message(
-            telegram_id,
-            f"⚠ <b>ТЕСТОВОЕ НАПАДЕНИЕ!</b>\n"
-            f"{enemy_name} атакует ваш дом.",
-            reply_markup=house_attack_keyboard(attack.id),
-        )
-    except Exception:
-        pass
+    settings = get_settings()
+    if settings.game_chat_id:
+        try:
+            await callback.bot.send_message(
+                settings.game_chat_id,
+                f"⚠ <b>ТЕСТОВОЕ НАПАДЕНИЕ!</b>\n"
+                f"{enemy_name} атакует владение <b>{character.house.name}</b>.\n"
+                f"Владелец: {character.name}",
+                reply_markup=house_attack_keyboard(attack.id),
+            )
+        except Exception:
+            pass
 
     await callback.answer("Нападение создано.", show_alert=True)
 

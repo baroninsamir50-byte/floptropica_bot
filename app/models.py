@@ -66,6 +66,9 @@ class Character(Base):
     work_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     work_reward_claimed: Mapped[bool] = mapped_column(Boolean, default=True)
     work_profession: Mapped[str | None] = mapped_column(String(100))
+    development_pack_date: Mapped[str | None] = mapped_column(String(10))
+    daily_reward_date: Mapped[str | None] = mapped_column(String(10))
+    login_streak: Mapped[int] = mapped_column(Integer, default=0)
 
     user: Mapped[User] = relationship(back_populates="character")
     house: Mapped["House"] = relationship(back_populates="owner", uselist=False, cascade="all, delete-orphan")
@@ -226,6 +229,8 @@ class HouseAttack(Base):
     damage_done: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    defender_character_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"))
+    helped_by_friend: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class SystemMedia(Base):

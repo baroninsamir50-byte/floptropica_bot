@@ -8,11 +8,18 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.keyboards import (
-    house_attack_keyboard, house_battle_keyboard, house_panel_keyboard,
+    house_battle_keyboard,
+    house_panel_keyboard,
     repair_house_keyboard,
 )
-from app.models import Character, HouseAttack, OwnedNpc
-from app.services import apply_levels, get_character, get_effective_stats, percent_bonus
+from app.models import Character, House, HouseAttack, OwnedNpc
+from app.services import (
+    apply_levels,
+    change_gold,
+    get_character,
+    get_effective_stats,
+    percent_bonus,
+)
 
 router = Router()
 
@@ -37,6 +44,17 @@ async def guards_count(session: AsyncSession, character_id: int) -> int:
     return result.scalar_one_or_none() or 0
 
 
+async def owner_for_attack(
+    session: AsyncSession,
+    attack: HouseAttack,
+) -> tuple[House, Character] | tuple[None, None]:
+    house = await session.get(House, attack.house_id)
+    if not house:
+        return None, None
+    owner = await session.get(Character, house.owner_id)
+    return house, owner
+
+
 def integrity_label(value: int) -> str:
     if value >= 80:
         return "🟢 Надёжное"
@@ -47,7 +65,11 @@ def integrity_label(value: int) -> str:
     return "🔴 На грани разрушения"
 
 
-async def show_house_panel(target: Message, session: AsyncSession, telegram_id: int):
+async def show_house_panel(
+    target: Message,
+    session: AsyncSession,
+    telegram_id: int,
+):
     char = await get_character(session, telegram_id)
     if not char or not char.house:
         await target.answer("Дом не найден. Сначала зарегистрируйтесь: /start")
@@ -56,12 +78,7 @@ async def show_house_panel(target: Message, session: AsyncSession, telegram_id: 
     guard_total = await guards_count(session, char.id)
     attack_text = "Нет активной угрозы"
     if attack:
-        statuses = {
-            "waiting": "⚠ Ожидает вашего решения",
-            "player_fighting": "⚔ Вы защищаете дом",
-            "guards_fighting": "👮 Стража ведёт бой",
-        }
-        attack_text = f"{attack.enemy_name}: {statuses.get(attack.status, attack.status)}"
+        attack_text = f"{attack.enemy_name}: {attack.status}"
     await target.answer(
         f"🏰 <b>Панель владения: {char.house.name}</b>\n\n"
         f"🏗 Прочность: {char.house.integrity}/100 — {integrity_label(char.house.integrity)}\n"
@@ -69,9 +86,9 @@ async def show_house_panel(target: Message, session: AsyncSession, telegram_id: 
         f"🛡 Постоянная защита: {char.house.defense}\n"
         f"👮 Стражники: {guard_total}\n"
         f"🐉 Угроза: {attack_text}\n\n"
-        "Ежедневная угроза появляется после установленного часа. "
-        "На ответ даётся 10 минут, затем стража действует автоматически.",
-        reply_markup=house_panel_keyboard(attack.id if attack and attack.status == "waiting" else None),
+        "Нападения публикуются в общем игровом чате. "
+        "Дом может защищать владелец или другой гражданин.",
+        reply_markup=house_panel_keyboard(),
     )
 
 
@@ -109,22 +126,18 @@ async def repair_house(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Дом не найден.", show_alert=True)
         return
     missing = 100 - char.house.integrity
-    if missing <= 0:
-        await callback.answer("Дом уже полностью восстановлен.", show_alert=True)
-        return
     requested = callback.data.split(":", 1)[1]
     amount = min(missing, char.house.repair_energy)
     if requested != "max":
         amount = min(amount, int(requested))
     if amount <= 0:
-        await callback.answer("Недостаточно энергии ремонта.", show_alert=True)
+        await callback.answer("Ремонт сейчас невозможен.", show_alert=True)
         return
     char.house.repair_energy -= amount
     char.house.integrity += amount
-    await callback.answer(f"Восстановлено {amount} прочности.", show_alert=True)
+    await callback.answer(f"Восстановлено {amount}.", show_alert=True)
     await callback.message.edit_text(
-        f"✅ Дом отремонтирован.\n"
-        f"Прочность: {char.house.integrity}/100\n"
+        f"✅ Прочность дома: {char.house.integrity}/100\n"
         f"Осталось энергии: {char.house.repair_energy}",
         reply_markup=repair_house_keyboard(),
     )
@@ -150,48 +163,83 @@ async def last_attack(callback: CallbackQuery, session: AsyncSession):
         f"Враг: {attack.enemy_name}\n"
         f"Статус: {attack.status}\n"
         f"Урон дому: {attack.damage_done}\n"
-        f"Использовано стражников: {attack.guards_used}"
+        f"Помощь друга: {'да' if attack.helped_by_friend else 'нет'}"
+    )
+
+
+async def begin_fight(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    helper_mode: bool,
+):
+    attack_id = int(callback.data.split(":")[1])
+    attack = await session.get(HouseAttack, attack_id)
+    defender = await get_character(session, callback.from_user.id)
+    if not attack or not defender:
+        await callback.answer("Бой недоступен.", show_alert=True)
+        return
+    house, owner = await owner_for_attack(session, attack)
+    if not house or not owner:
+        await callback.answer("Владение не найдено.", show_alert=True)
+        return
+    if attack.status != "waiting":
+        await callback.answer("Другой защитник уже вступил в бой.", show_alert=True)
+        return
+
+    is_owner = defender.id == owner.id
+    if helper_mode and is_owner:
+        await callback.answer("Вы владелец — используйте кнопку владельца.", show_alert=True)
+        return
+    if not helper_mode and not is_owner:
+        await callback.answer("Эта кнопка предназначена владельцу дома.", show_alert=True)
+        return
+
+    stats = await get_effective_stats(session, defender)
+    attack.status = "player_fighting"
+    attack.defender_character_id = defender.id
+    attack.helped_by_friend = not is_owner
+    attack.player_hp = stats["health"] + stats["endurance"] * 2 + defender.level * 2
+    attack.player_mana = stats["mana"] + stats["intelligence"]
+    await callback.answer("Вы вступили в бой!")
+    await callback.message.edit_text(
+        f"⚔ <b>Оборона владения «{house.name}»</b>\n\n"
+        f"Защитник: <b>{defender.name}</b>\n"
+        f"❤️ {attack.player_hp} | 🔮 {attack.player_mana}\n"
+        f"{attack.enemy_name}: ❤️ {attack.enemy_hp}\n\n"
+        + (
+            "🤝 Дом защищает друг. Даже при победе владение потеряет 10 прочности."
+            if attack.helped_by_friend else
+            "🏰 Владелец лично защищает своё владение."
+        ),
+        reply_markup=house_battle_keyboard(attack.id),
     )
 
 
 @router.callback_query(F.data.startswith("housefight:"))
-async def start_personal_fight(callback: CallbackQuery, session: AsyncSession):
-    attack = await session.get(HouseAttack, int(callback.data.split(":")[1]))
-    char = await get_character(session, callback.from_user.id)
-    if not char or not char.house or not attack or attack.house_id != char.house.id:
-        await callback.answer("Это нападение относится к другому дому.", show_alert=True)
-        return
-    if attack.status not in {"waiting", "guards_fighting"}:
-        await callback.answer("Нельзя начать этот бой.", show_alert=True)
-        return
-    if attack.status == "guards_fighting":
-        await callback.answer("Стража уже вступила в бой.", show_alert=True)
-        return
-    stats = await get_effective_stats(session, char)
-    attack.status = "player_fighting"
-    attack.player_hp = stats["health"] + stats["endurance"] * 2 + char.level * 2
-    attack.player_mana = stats["mana"] + stats["intelligence"]
-    await callback.answer("Вы вступили в бой!")
-    await callback.message.edit_text(
-        f"⚔ <b>Оборона дома</b>\n\n"
-        f"{char.name}: ❤️ {attack.player_hp} | 🔮 {attack.player_mana}\n"
-        f"{attack.enemy_name}: ❤️ {attack.enemy_hp}\n\n"
-        "Выберите действие:",
-        reply_markup=house_battle_keyboard(attack.id),
-    )
+async def owner_fight(callback: CallbackQuery, session: AsyncSession):
+    await begin_fight(callback, session, helper_mode=False)
+
+
+@router.callback_query(F.data.startswith("househelp:"))
+async def helper_fight(callback: CallbackQuery, session: AsyncSession):
+    await begin_fight(callback, session, helper_mode=True)
 
 
 @router.callback_query(F.data.startswith("houseguards:"))
 async def send_guards(callback: CallbackQuery, session: AsyncSession):
     attack = await session.get(HouseAttack, int(callback.data.split(":")[1]))
     char = await get_character(session, callback.from_user.id)
-    if not char or not char.house or not attack or attack.house_id != char.house.id:
+    if not attack or not char:
         await callback.answer("Недоступно.", show_alert=True)
         return
-    if attack.status not in {"waiting", "player_fighting"}:
-        await callback.answer("Стража уже действует или бой завершён.", show_alert=True)
+    house, owner = await owner_for_attack(session, attack)
+    if not owner or char.id != owner.id:
+        await callback.answer("Стражу может отправить только владелец.", show_alert=True)
         return
-    count = await guards_count(session, char.id)
+    if attack.status != "waiting":
+        await callback.answer("Бой уже начался.", show_alert=True)
+        return
+    count = await guards_count(session, owner.id)
     if count <= 0:
         await callback.answer("У вас нет стражников.", show_alert=True)
         return
@@ -201,10 +249,8 @@ async def send_guards(callback: CallbackQuery, session: AsyncSession):
     attack.guard_finish_at = datetime.now(timezone.utc) + timedelta(hours=hours)
     await callback.answer("Стража отправлена!", show_alert=True)
     await callback.message.edit_text(
-        f"👮 Стража вступила в бой с {attack.enemy_name}.\n"
-        f"Использовано стражников: {attack.guards_used}\n"
-        f"Расчётное время боя: {hours} ч.\n\n"
-        "Бот автоматически сообщит результат."
+        f"👮 {attack.guards_used} стражника защищают «{house.name}».\n"
+        f"Результат боя будет через {hours} ч."
     )
 
 
@@ -212,65 +258,69 @@ async def send_guards(callback: CallbackQuery, session: AsyncSession):
 async def house_action(callback: CallbackQuery, session: AsyncSession):
     _, attack_id, action = callback.data.split(":", 2)
     attack = await session.get(HouseAttack, int(attack_id))
-    char = await get_character(session, callback.from_user.id)
-    if not char or not char.house or not attack or attack.house_id != char.house.id:
-        await callback.answer("Недоступно.", show_alert=True)
+    defender = await get_character(session, callback.from_user.id)
+    if not attack or not defender or attack.defender_character_id != defender.id:
+        await callback.answer("Сейчас сражается другой игрок.", show_alert=True)
         return
     if attack.status != "player_fighting":
-        await callback.answer("Бой уже завершён или передан страже.", show_alert=True)
+        await callback.answer("Бой уже завершён.", show_alert=True)
         return
 
-    stats = await get_effective_stats(session, char)
+    house, owner = await owner_for_attack(session, attack)
+    stats = await get_effective_stats(session, defender)
+
     if action == "defend":
         attack.player_defending = True
         heal = max(1, stats["endurance"] // 4)
         attack.player_hp += heal
-        log = f"🛡 Вы укрепляете оборону и восстанавливаете {heal} здоровья."
+        player_log = f"🛡 Защитник восстанавливает {heal} здоровья."
     else:
-        enemy_evasion = min(5, max(1, attack.enemy_power // 20))
-        hit = randint(1, 100) <= 92 - enemy_evasion
-        if not hit:
-            log = f"💨 {attack.enemy_name} уклоняется от удара."
+        if action == "magic":
+            cost = max(6, 12 - min(5, stats["intelligence"] // 8))
+            if attack.player_mana < cost:
+                await callback.answer(f"Нужно {cost} маны.", show_alert=True)
+                return
+            attack.player_mana -= cost
+            damage = randint(9, 15) + stats["magic"] + stats["intelligence"] // 3
+            label = "магический удар"
         else:
-            if action == "magic":
-                cost = max(6, 12 - min(5, stats["intelligence"] // 8))
-                if attack.player_mana < cost:
-                    await callback.answer(f"Нужно {cost} маны.", show_alert=True)
-                    return
-                attack.player_mana -= cost
-                damage = randint(9, 15) + stats["magic"] + stats["intelligence"] // 3
-                label = "магический удар"
-            else:
-                damage = randint(7, 13) + stats["strength"] + char.level // 2
-                crit = randint(1, 100) <= 5 + min(5, stats["luck"] // 5)
-                if crit:
-                    damage = int(damage * 1.5)
-                label = "критическую атаку" if crit else "силовую атаку"
-            attack.enemy_hp = max(0, attack.enemy_hp - damage)
-            log = f"💥 Вы применяете {label} и наносите {damage} урона."
+            damage = randint(7, 13) + stats["strength"] + defender.level // 2
+            crit = randint(1, 100) <= 5 + min(10, stats["luck"] // 4)
+            if crit:
+                damage = int(damage * 1.5)
+            label = "критическую атаку" if crit else "силовую атаку"
+        attack.enemy_hp = max(0, attack.enemy_hp - damage)
+        player_log = f"💥 {defender.name} применяет {label}: {damage} урона."
 
     if attack.enemy_hp <= 0:
-        attack.status = "player_won"
+        attack.status = "friend_won" if attack.helped_by_friend else "owner_won"
         attack.finished_at = datetime.now(timezone.utc)
-        stat_name = "strength" if randint(0, 1) == 0 else "magic"
-        setattr(char, stat_name, getattr(char, stat_name) + 1)
-        energy = randint(12, 20)
-        char.house.repair_energy += energy
-        char.experience += 15
-        apply_levels(char)
+        if attack.helped_by_friend:
+            house.integrity = max(0, house.integrity - 10)
+            attack.damage_done = 10
+            defender.development_points += 10
+            defender.experience += 25
+            await change_gold(session, defender, 3, "friend_house_defense")
+            reward = (
+                "🤝 Друг спас владение и получает 10 очков развития, "
+                "25 XP и 3 золота.\n"
+                f"Дом теряет 10 прочности: {house.integrity}/100."
+            )
+        else:
+            energy = randint(12, 20)
+            house.repair_energy += energy
+            defender.experience += 20
+            reward = f"🏰 Владелец получает {energy} энергии ремонта и 20 XP."
+        apply_levels(defender)
         await callback.answer()
         await callback.message.edit_text(
-            f"🏆 <b>Дом защищён!</b>\n\n"
-            f"Вы победили {attack.enemy_name}.\n"
-            f"Получено: +1 к {'силе' if stat_name == 'strength' else 'магии'}, "
-            f"{energy} энергии ремонта и 15 XP."
+            f"🏆 <b>{defender.name} побеждает {attack.enemy_name}!</b>\n\n{reward}"
         )
         return
 
-    # Ответ врага
     evade = percent_bonus(stats["agility"], attack.enemy_power // 3)
     if randint(1, 100) <= evade:
-        enemy_log = f"💨 Ловкость помогла уклониться (+{evade}%)."
+        enemy_log = f"💨 Ловкость помогает уклониться (+{evade}%)."
     else:
         damage = randint(7, 14) + attack.enemy_power // 8
         protection = percent_bonus(stats["endurance"], attack.enemy_power // 3)
@@ -279,26 +329,26 @@ async def house_action(callback: CallbackQuery, session: AsyncSession):
             damage = max(1, damage // 2)
             attack.player_defending = False
         attack.player_hp = max(0, attack.player_hp - damage)
-        enemy_log = f"🐲 Враг наносит {damage} урона. Выносливость снизила урон на {protection}%."
+        enemy_log = f"🐲 Враг наносит {damage} урона."
 
     if attack.player_hp <= 0:
-        damage_house = randint(12, 28)
-        char.house.integrity = max(0, char.house.integrity - damage_house)
+        damage_house = randint(15, 30)
+        house.integrity = max(0, house.integrity - damage_house)
         attack.damage_done = damage_house
         attack.status = "enemy_won"
         attack.finished_at = datetime.now(timezone.utc)
         await callback.answer()
         await callback.message.edit_text(
-            f"💀 Вы проиграли бой. {attack.enemy_name} повреждает дом на {damage_house}.\n"
-            f"Прочность дома: {char.house.integrity}/100."
+            f"💀 Защитник проиграл. Дом получает {damage_house} урона.\n"
+            f"Прочность: {house.integrity}/100."
         )
         return
 
     await callback.answer()
     await callback.message.edit_text(
-        f"{log}\n{enemy_log}\n\n"
-        f"⚔ <b>Оборона дома</b>\n"
-        f"{char.name}: ❤️ {attack.player_hp} | 🔮 {attack.player_mana}\n"
+        f"{player_log}\n{enemy_log}\n\n"
+        f"⚔ <b>Оборона «{house.name}»</b>\n"
+        f"{defender.name}: ❤️ {attack.player_hp} | 🔮 {attack.player_mana}\n"
         f"{attack.enemy_name}: ❤️ {attack.enemy_hp}",
         reply_markup=house_battle_keyboard(attack.id),
     )

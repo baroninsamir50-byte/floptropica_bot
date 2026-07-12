@@ -48,6 +48,9 @@ async def change_gold(session: AsyncSession, character: Character, amount: int, 
 
 async def seed_items(session: AsyncSession) -> None:
     catalog = [
+        ("development_points_30", "Свиток развития +30",
+         "Даёт 30 свободных очков развития. Можно купить один раз в сутки.",
+         45, None, "Мифический", None, 0),
         ("iron_sword", "Железный меч", "+2 к силе", 20, "weapon", "Обычный", "strength", 2),
         ("knight_blade", "Клинок рыцаря", "+4 к силе", 45, "weapon", "Необычный", "strength", 4),
         ("mage_staff", "Посох мага", "+5 к магии", 60, "weapon", "Редкий", "magic", 5),
@@ -79,10 +82,13 @@ async def seed_items(session: AsyncSession) -> None:
 async def get_daily_shop_items(session: AsyncSession, count: int = 5) -> list[ItemTemplate]:
     result = await session.execute(select(ItemTemplate).order_by(ItemTemplate.slug))
     items = list(result.scalars().all())
-    if len(items) <= count:
-        return items
-    seed = int.from_bytes(hashlib.sha256(local_date().encode()).digest()[:8], "big")
-    return Random(seed).sample(items, count)
+    special = next((x for x in items if x.slug == "development_points_30"), None)
+    regular = [x for x in items if x.slug != "development_points_30"]
+    seed = int.from_bytes(
+        hashlib.sha256(f"shop:{local_date()}".encode()).digest()[:8], "big"
+    )
+    selected = Random(seed).sample(regular, min(max(count - 1, 0), len(regular)))
+    return ([special] if special else []) + selected
 
 
 async def start_work(character: Character, profession: str | None = None) -> str:
@@ -129,7 +135,9 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
         bonus_stat = profession_data.get("bonus_stat")
     else:
         gold_range, xp_range, bonus_stat = (1, 5), (5, 10), None
-    gold, xp = randint(*gold_range), randint(*xp_range)
+    multiplier = level_income_multiplier(character.level)
+    gold = max(1, int(randint(*gold_range) * multiplier))
+    xp = randint(*xp_range) + character.level // 3
     await change_gold(session, character, gold, f"work_reward:{profession}")
     character.experience += xp
     if bonus_stat and randint(1, 100) <= 20:
@@ -146,8 +154,17 @@ async def buy_item(session: AsyncSession, character: Character, item_id: int) ->
     daily_items = await get_daily_shop_items(session)
     if item.id not in {x.id for x in daily_items}:
         raise ValueError("Сегодня этого предмета уже нет в магазине.")
-    await change_gold(session, character, -item.price, f"buy:{item.slug}")
 
+    if item.slug == "development_points_30":
+        today = local_date()
+        if character.development_pack_date == today:
+            raise ValueError("Сегодня вы уже покупали свиток развития.")
+        await change_gold(session, character, -item.price, "buy:development_points_30")
+        character.development_points += 30
+        character.development_pack_date = today
+        return item
+
+    await change_gold(session, character, -item.price, f"buy:{item.slug}")
     result = await session.execute(
         select(InventoryItem).where(
             InventoryItem.character_id == character.id,
@@ -226,7 +243,8 @@ async def collect_npc_income(session: AsyncSession, character: Character) -> int
         raise ValueError("У вас нет крестьян.")
     if peasants.last_income_date == today:
         raise ValueError("Сегодня доход уже собран.")
-    amount = sum(randint(1, 2) for _ in range(peasants.quantity))
+    base_amount = sum(randint(1, 2) for _ in range(peasants.quantity))
+    amount = max(1, int(base_amount * level_income_multiplier(character.level)))
     peasants.last_income_date = today
     await change_gold(session, character, amount, "npc_daily_income")
     return amount
@@ -288,3 +306,51 @@ async def set_system_media(session: AsyncSession, key: str, file_id: str) -> Non
         media.file_id = file_id
     else:
         session.add(SystemMedia(key=key, file_id=file_id))
+
+
+
+def level_income_multiplier(level: int) -> float:
+    """Каждый уровень даёт +5% дохода, максимум +100%."""
+    return 1.0 + min(max(level - 1, 0), 20) * 0.05
+
+
+def level_rank(level: int) -> str:
+    if level >= 30:
+        return "Легенда Флоптропики"
+    if level >= 20:
+        return "Королевский герой"
+    if level >= 15:
+        return "Магистр Королевства"
+    if level >= 10:
+        return "Знатный гражданин"
+    if level >= 5:
+        return "Опытный гражданин"
+    return "Начинающий гражданин"
+
+
+async def claim_daily_reward(
+    session: AsyncSession,
+    character: Character,
+) -> tuple[int, int, int]:
+    today = local_date()
+    if character.daily_reward_date == today:
+        raise ValueError("Ежедневный подарок уже получен.")
+
+    local_today = datetime.now(ZoneInfo(get_settings().timezone)).date()
+    yesterday = (local_today - timedelta(days=1)).isoformat()
+    if character.daily_reward_date == yesterday:
+        character.login_streak += 1
+    else:
+        character.login_streak = 1
+
+    multiplier = level_income_multiplier(character.level)
+    gold = max(1, int((2 + min(character.login_streak, 7)) * multiplier))
+    xp = 5 + min(character.login_streak, 7) * 2
+    development = 5 if character.login_streak % 7 == 0 else 0
+
+    await change_gold(session, character, gold, "daily_reward")
+    character.experience += xp
+    character.development_points += development
+    character.daily_reward_date = today
+    apply_levels(character)
+    return gold, xp, development

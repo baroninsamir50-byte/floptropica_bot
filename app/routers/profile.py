@@ -5,7 +5,10 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
 from app.keyboards import development_keyboard, house_panel_keyboard, main_menu, treasury_keyboard
-from app.services import get_character, get_equipment_bonuses, get_system_media, xp_for_next
+from app.services import (
+    get_character, get_equipment_bonuses, get_system_media, xp_for_next,
+    level_income_multiplier, level_rank,
+)
 from app.states import ChangeHousePhoto, ChangePortrait
 router = Router()
 
@@ -19,7 +22,9 @@ async def hero_caption(session, c):
     total=lambda k: getattr(c,k)+bonuses.get(k,0)
     return (
         f"👑 <b>{c.name}</b>\n⭐ Уровень: {c.level}\n✨ Опыт: {c.experience}/{xp_for_next(c.level)}\n"
-        f"🎯 Свободные очки развития: {c.development_points}/100\n\n"
+        f"🎯 Свободные очки развития: {c.development_points}\n"
+        f"🏅 Ранг: {level_rank(c.level)}\n"
+        f"💹 Бонус дохода: +{int((level_income_multiplier(c.level)-1)*100)}%\n\n"
         f"❤️ Здоровье: {total('health')}\n🔮 Мана: {total('mana')}\n💪 Сила: {total('strength')}\n"
         f"🧠 Интеллект: {total('intelligence')}\n🏃 Ловкость: {total('agility')}\n"
         f"🪄 Магия: {total('magic')}\n🍀 Удача: {total('luck')}\n"

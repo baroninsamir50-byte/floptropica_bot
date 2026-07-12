@@ -4,11 +4,23 @@ from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+from app.miniapp.api import router as miniapp_router
 
 from app.config import get_settings
 from app.scheduler import process_due_game_tasks
 
 app = FastAPI(title="Floptropica Bot Health")
+
+STATIC_DIR = Path(__file__).resolve().parent / "miniapp" / "static"
+app.mount("/miniapp/static", StaticFiles(directory=STATIC_DIR), name="miniapp-static")
+app.include_router(miniapp_router)
+
+@app.get("/miniapp")
+async def miniapp_index():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.get("/")
