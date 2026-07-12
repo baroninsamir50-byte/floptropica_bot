@@ -10,7 +10,10 @@ if (tg) {
 const state = {
   data: null,
   view: "home",
-  protectedImages: new Map()
+  protectedImages: new Map(),
+  duels: null,
+  duelStyle: "guardian",
+  duelPoll: null
 };
 const $ = id => document.getElementById(id);
 const content = $("content");
@@ -510,20 +513,112 @@ function factionsView() {
     </div>`);
 }
 
+
+async function loadDuelCenter(silent=false) {
+  try {
+    state.duels = await api("/duels");
+    if (state.view === "games") render();
+  } catch (error) {
+    if (!silent) toast(error.message);
+  }
+}
+
+function duelStyleSelect(selected=state.duelStyle) {
+  const styles=state.duels?.styles || [];
+  return `<div class="style-grid">${styles.map(style=>`
+    <button class="style-card ${selected===style.key?'selected':''}" onclick="state.duelStyle='${style.key}';render()">
+      <b>${style.name}</b>
+      <small>${{
+        berserk:'+25% урон · −15% защита',
+        guardian:'+30% защита · −10% урон',
+        magister:'+25% магия · −10% физический урон',
+        duelist:'+уклонение и мобильность'
+      }[style.key]||''}</small>
+    </button>`).join('')}</div>`;
+}
+
+function duelPortrait(character, sideClass='') {
+  return `<div class="duel-fighter ${sideClass}">
+    <div class="duel-portrait-wrap">
+      <img class="duel-portrait image-loading" data-protected-image="/duel-image/${character.id}" alt="${character.name}">
+      ${mediaUrl('duel_frame')?`<img class="duel-frame" src="${mediaUrl('duel_frame')}" alt="">`:''}
+    </div>
+    <h3>${character.name}</h3>
+    <p>Ур. ${character.level} · ${character.title}</p>
+    <span class="badge">🏆 ${character.rating}</span>
+  </div>`;
+}
+
+function duelBattleView(duel) {
+  const b=duel.battle, c=duel.challenger, o=duel.opponent;
+  const mySide=duel.viewer_side, myTurn=duel.is_my_turn;
+  const actions=[
+    ['attack','⚔','Атака'],['magic','✨','Магия'],['defend','🛡','Защита'],
+    ['dodge','🏃','Уклонение'],['critical','💥','Крит'],['potion','🧪','Зелье']
+  ];
+  const maxHp=Math.max(c.stats.health+c.stats.endurance*3+c.level*8,o.stats.health+o.stats.endurance*3+o.level*8,1);
+  return `<div class="duel-arena" ${bgStyle('duel_bg')}>
+    <div class="duel-versus-grid">
+      ${duelPortrait(c,'left')}
+      <div class="versus-mark">${mediaUrl('duel_vs')?`<img src="${mediaUrl('duel_vs')}" alt="VS">`:'VS'}</div>
+      ${duelPortrait(o,'right')}
+    </div>
+    <div class="duel-bars-grid">
+      <div>${combatBars(c,b.challenger_hp,b.challenger_mana,b.challenger_stamina,maxHp)}</div>
+      <div>${combatBars(o,b.opponent_hp,b.opponent_mana,b.opponent_stamina,maxHp)}</div>
+    </div>
+    <div class="turn-banner ${myTurn?'my-turn':''}">${duel.status==='finished' ? (duel.winner_id===state.duels.me.id?'🏆 Победа':'💀 Поражение') : (myTurn?'Ваш ход':'Ход соперника')}</div>
+    ${duel.status==='active'?`<div class="duel-actions">${actions.map(([key,icon,label])=>`<button onclick="duelAction(${duel.id},'${key}')" ${myTurn?'':'disabled'}><span>${icon}</span><b>${label}</b></button>`).join('')}</div>`:''}
+    <div class="battle-log"><h3>📜 Ход боя</h3>${(b.log||[]).slice(-8).reverse().map(x=>`<p>${x}</p>`).join('')||'<p>Дуэль ещё не началась.</p>'}</div>
+  </div>`;
+}
+
+function combatBars(character,hp,mana,stamina,maxHp) {
+  return `<div class="combat-bars"><b>${character.name}</b>
+    <div class="combat-line hp"><span style="width:${Math.max(0,Math.min(100,hp/maxHp*100))}%"></span><em>❤️ ${hp}</em></div>
+    <div class="combat-line mana"><span style="width:${Math.max(0,Math.min(100,mana/250*100))}%"></span><em>🔮 ${mana}</em></div>
+    <div class="combat-line stamina"><span style="width:${Math.max(0,Math.min(100,stamina/160*100))}%"></span><em>⚡ ${stamina}</em></div>
+  </div>`;
+}
+
+window.challengePlayer=async opponentId=>{
+  try{await api('/duels/challenge',{method:'POST',body:JSON.stringify({opponent_id:opponentId,style:state.duelStyle})});toast('Вызов отправлен');await loadDuelCenter();}catch(e){toast(e.message)}
+};
+window.acceptDuel=async duelId=>{
+  try{await api(`/duels/${duelId}/accept`,{method:'POST',body:JSON.stringify({style:state.duelStyle})});toast('Дуэль началась');await loadDuelCenter();}catch(e){toast(e.message)}
+};
+window.declineDuel=async duelId=>{
+  try{await api(`/duels/${duelId}/decline`,{method:'POST'});await loadDuelCenter();}catch(e){toast(e.message)}
+};
+window.duelAction=async(duelId,action)=>{
+  try{state.duels.active=await api(`/duels/${duelId}/action`,{method:'POST',body:JSON.stringify({action})});render();}catch(e){toast(e.message)}
+};
+
+function customizationView() {
+  if (!state.data.is_admin) return section('⚙ Кастомизация','<div class="panel">Недостаточно прав.</div>');
+  const labels={home_bg:'Фон главной',hero_bg:'Фон героя',house_bg:'Фон владения',treasury:'Фон казны',shop:'Фон магазина',development:'Фон развития',factions:'Фон фракций',map:'Карта',games_bg:'Фон игр',inventory_bg:'Фон инвентаря',loading_bg:'Фон загрузки',app_logo:'Эмблема',topbar_bg:'Верхняя панель',nav_bg:'Нижнее меню',card_texture:'Текстура карточек',frame_hero:'Рамка героя',frame_house:'Рамка дома',duel_bg:'Фон дуэли',duel_frame:'Рамка бойца',duel_vs:'Знак VS',icon_customization:'Иконка кастомизации'};
+  return section('⚙ Студия оформления',`<div class="panel"><p>Нажмите на элемент и выберите изображение. Оно сразу сохранится через Telegram и применится к Mini App.</p></div><div class="theme-grid">${Object.entries(labels).map(([key,label])=>`<label class="theme-item"><div class="theme-preview" ${state.data.media[key]?`style="background-image:url('${state.data.media[key]}')"`:''}></div><b>${label}</b><input type="file" accept="image/*" onchange="uploadTheme('${key}',this.files[0])"></label>`).join('')}</div>`);
+}
+
+window.uploadTheme=async(key,file)=>{
+  if(!file)return;
+  const form=new FormData();form.append('file',file);
+  try{
+    const response=await fetch(`/api/miniapp/admin/theme/${key}`,{method:'POST',headers:{'X-Telegram-Init-Data':initData},body:form});
+    const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Ошибка загрузки');
+    toast('Оформление обновлено');await refresh();go('customization');
+  }catch(e){toast(e.message)}
+};
 function gamesView() {
-  return section("🎲 Игровая арена", `
-    <div class="panel media-panel" ${bgStyle("games_bg")}><p>Арена Королевства объединяет дуэли и совместные походы.</p></div><div class="cards">
-      <div class="card">
-        <div class="eyebrow">PVP</div>
-        <h3>⚔ Королевская дуэль</h3>
-        <p>Вызовите соперника командой /duel, ответив на его сообщение.</p>
-      </div>
-      <div class="card">
-        <div class="eyebrow">CO-OP</div>
-        <h3>🧭 Проклятый лабиринт</h3>
-        <p>Создайте экспедицию командой /expedition. До шести игроков.</p>
-      </div>
-    </div>`);
+  const d=state.duels;
+  if (!d) {
+    setTimeout(()=>loadDuelCenter(),0);
+    return section("⚔ Королевская дуэль", `<div class="panel center-panel">Загружаем арену…</div>`);
+  }
+  if (d.active) return section("⚔ Королевская дуэль", duelBattleView(d.active));
+  const incoming=d.incoming.map(x=>`<div class="card"><div class="row"><b>${x.challenger.name} вызывает вас</b><span class="badge">Ур. ${x.challenger.level}</span></div>${duelStyleSelect()}<div class="action-grid"><button class="btn gold" onclick="acceptDuel(${x.id})">Принять</button><button class="btn secondary" onclick="declineDuel(${x.id})">Отклонить</button></div></div>`).join('');
+  const players=d.players.map(p=>`<div class="duel-player-card"><img class="image-loading" data-protected-image="/duel-image/${p.id}" alt="${p.name}"><div><b>${p.name}</b><small>Ур. ${p.level} · 🏆 ${p.rating}</small><small>${p.wins} побед · ${p.losses} поражений</small></div><button class="btn gold" onclick="challengePlayer(${p.id})">Вызвать</button></div>`).join('');
+  return section("⚔ Королевская дуэль", `<div class="panel duel-intro" ${bgStyle('duel_bg')}><div class="eyebrow">50% РАЗВИТИЕ · 50% СУДЬБА</div><h2>Арена Флоптропики</h2><p>Уровень, характеристики и экипировка дают половину результата. Вторая половина каждого действия определяется удачей и случайностью.</p>${duelStyleSelect()}</div>${incoming?`<h3 class="subheading">Входящие вызовы</h3><div class="cards">${incoming}</div>`:''}<h3 class="subheading">Выберите соперника</h3><div class="duel-player-list">${players||'<div class="panel">Других игроков пока нет.</div>'}</div>${d.outgoing.length?`<div class="panel">⏳ Ожидают ответа: ${d.outgoing.map(x=>x.opponent.name).join(', ')}</div>`:''}`);
 }
 
 function moreView() {
@@ -550,12 +645,19 @@ function render() {
     map: mapView,
     factions: factionsView,
     games: gamesView,
+    customization: customizationView,
     more: moreView
   };
 
   applyActiveScreenBackground();
   content.innerHTML = (views[state.view] || homeView)();
   hydrateProtectedImages();
+  const oldAdmin=document.getElementById('adminStudioButton'); if(oldAdmin) oldAdmin.remove();
+  if(state.data?.is_admin && state.view!=='customization'){
+    const button=document.createElement('button');button.id='adminStudioButton';button.className='admin-studio-fab';button.innerHTML=mediaUrl('icon_customization')?`<img src="${mediaUrl('icon_customization')}" alt="">`:'⚙';button.onclick=()=>go('customization');document.body.appendChild(button);
+  }
+  clearInterval(state.duelPoll);
+  if(state.view==='games' && state.duels?.active){state.duelPoll=setInterval(()=>loadDuelCenter(true),3500);}
 
   document.querySelectorAll(".bottom-nav button").forEach(button => {
     button.classList.toggle("active", button.dataset.view === state.view);
@@ -569,6 +671,7 @@ window.showStreakInfo = showStreakInfo;
 
 window.go = view => {
   state.view = view;
+  if(view==='games') loadDuelCenter(true);
   render();
   tg?.HapticFeedback?.selectionChanged?.();
 };

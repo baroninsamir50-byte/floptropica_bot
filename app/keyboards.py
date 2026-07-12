@@ -256,6 +256,10 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         ("🎒 Иконка инвентаря", "icon_inventory"),
         ("🏋 Иконка развития", "icon_development"),
         ("🎁 Иконка подарка", "icon_daily"),
+        ("⚔ Фон дуэльной арены", "duel_bg"),
+        ("🖼 Рамка бойцов дуэли", "duel_frame"),
+        ("VS Знак противостояния", "duel_vs"),
+        ("⚙ Иконка кастомизации", "icon_customization"),
     ]
     rows = [
         [InlineKeyboardButton(text=label, callback_data=f"adminmedia:{key}")]

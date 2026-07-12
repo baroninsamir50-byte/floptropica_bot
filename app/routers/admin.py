@@ -65,6 +65,10 @@ MEDIA_NAMES = {
     "icon_inventory": "иконки инвентаря",
     "icon_development": "иконки развития",
     "icon_daily": "иконки ежедневного подарка",
+    "duel_bg": "фона дуэльной арены",
+    "duel_frame": "рамки бойцов дуэли",
+    "duel_vs": "знака VS",
+    "icon_customization": "иконки кастомизации",
 }
 
 
