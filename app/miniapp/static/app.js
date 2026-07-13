@@ -16,6 +16,7 @@ const state = {
   tarotOffered: null,
   estate: null,
   npcs: null,
+  projectAdmins: null,
   duels: null,
   duelStyle: "guardian",
   duelPoll: null
@@ -414,9 +415,10 @@ function houseView() {
       `}
       ${mediaUrl("frame_house") ? `<img class="decorative-frame house-frame" src="${mediaUrl("frame_house")}" alt="">` : ""}
       <div class="house-photo-caption">
-        <div class="eyebrow">ЛИЧНОЕ ВЛАДЕНИЕ</div>
+        <div class="eyebrow">ВНЕШНИЙ ВИД ВЛАДЕНИЯ</div>
         <h2>${h.name}</h2>
         <p>${h.location}</p>
+        ${h.image_available ? `<button class="house-change-photo" onclick="openUpload('house')">📷 Заменить фото</button>` : ""}
       </div>
     </div>
 
@@ -733,6 +735,36 @@ async function hydrateStudioPreviews() {
   }));
 }
 
+async function loadProjectAdmins(silent=false) {
+  if (!state.data?.is_owner) return;
+  try {
+    state.projectAdmins = await api("/admin/project-admins");
+    if (!silent && state.view === "customization") render();
+  } catch (error) { if (!silent) toast(error.message); }
+}
+
+function projectAdminPanel() {
+  if (!state.data?.is_owner) return "";
+  if (!state.projectAdmins) {
+    setTimeout(() => loadProjectAdmins(), 0);
+    return `<div class="panel"><h3>👑 Администраторы проекта</h3><p class="muted">Загружаем список игроков…</p></div>`;
+  }
+  const rows = state.projectAdmins.users.map(item => `
+    <div class="project-admin-row">
+      <div><b>${item.character_name || item.first_name}</b><small>${item.username ? '@'+item.username : 'ID '+item.telegram_id}</small></div>
+      ${item.is_owner ? '<span class="badge">Создатель</span>' : `<button class="btn ${item.is_project_admin ? 'secondary' : 'gold'}" onclick="toggleProjectAdmin(${item.telegram_id},${!item.is_project_admin})">${item.is_project_admin ? 'Снять права' : 'Назначить админом'}</button>`}
+    </div>`).join("");
+  return `<div class="panel project-admin-panel"><div class="eyebrow">УПРАВЛЕНИЕ ДОСТУПОМ</div><h3>👑 Администраторы проекта</h3><p class="muted">Администратор получает кнопку ⚙ и может менять фоны, иконки, карты, модели врагов и облики NPC.</p><div class="project-admin-list">${rows}</div></div>`;
+}
+
+window.toggleProjectAdmin = async (telegram_id, enabled) => {
+  try {
+    await api("/admin/project-admins", {method:"POST",body:JSON.stringify({telegram_id,enabled})});
+    toast(enabled ? "Администратор назначен" : "Права администратора сняты");
+    await loadProjectAdmins(true); render();
+  } catch (error) { toast(error.message); }
+};
+
 function customizationView() {
   if (!state.data.is_admin) {
     return section('⚙ Кастомизация','<div class="panel">Недостаточно прав.</div>');
@@ -907,6 +939,8 @@ function customizationView() {
       <h3>Оформление Mini App</h3>
       <p>Загружайте, просматривайте и удаляйте изображения прямо здесь. Изменения применяются после обновления данных приложения.</p>
     </div>
+
+    ${projectAdminPanel()}
 
     <h3 class="subheading">Мои изображения</h3>
     <div class="theme-grid personal-media-grid">
@@ -1102,7 +1136,9 @@ async function loadTarotCenter() {
 
 function tarotCardVisual(card, compact=false) {
   const image = card.image_url
-    ? `<img class="tarot-card-image image-loading" data-protected-image="/tarot/cards/${card.id}/image" alt="${card.name}">`
+    ? (card.image_protected
+      ? `<img class="tarot-card-image image-loading" data-protected-image="/tarot/cards/${card.id}/image" alt="${card.name}">`
+      : `<img class="tarot-card-image" src="${card.image_url}" alt="${card.name}" loading="lazy" onerror="this.closest('.tarot-card-art').classList.add('image-failed');this.remove()">`)
     : `<div class="tarot-card-symbol">✦</div>`;
   return `<article class="tarot-gallery-card ${compact ? "compact" : ""}">
     <div class="tarot-card-art">${image}</div>
@@ -1359,6 +1395,7 @@ window.go = view => {
   if(view==='games') loadDuelCenter(true);
   if(view==='house') loadEstate(true);
   if(view==='npcs') loadNpcs(true);
+  if(view==='customization' && state.data?.is_owner) loadProjectAdmins(true);
   render();
   tg?.HapticFeedback?.selectionChanged?.();
 };

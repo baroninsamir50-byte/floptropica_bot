@@ -69,6 +69,8 @@ async def run_tasks(key: str = Query(default="")) -> dict[str, str]:
 @app.get("/version")
 async def version():
     return {
-        "version": "7.6.2-fixed",
+        "version": "7.7.0",
         "npc_appearance_cards": 120,
+        "standard_tarot_images": 78,
+        "project_admins": true,
     }

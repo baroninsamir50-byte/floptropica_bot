@@ -59,6 +59,37 @@ async def require_character(user, session):
         raise HTTPException(404, "Сначала создайте персонажа через /start")
     return c
 
+
+async def database_user(session: AsyncSession, telegram_id: int) -> User | None:
+    return await session.scalar(select(User).where(User.telegram_id == telegram_id))
+
+
+async def has_project_admin_rights(session: AsyncSession, telegram_id: int) -> bool:
+    from app.config import get_settings
+    if telegram_id in get_settings().admins:
+        return True
+    db_user = await database_user(session, telegram_id)
+    return bool(db_user and db_user.is_admin)
+
+
+async def require_project_admin(session: AsyncSession, telegram_id: int) -> User | None:
+    if not await has_project_admin_rights(session, telegram_id):
+        raise HTTPException(403, "Недостаточно прав")
+    return await database_user(session, telegram_id)
+
+
+def standard_tarot_image_url(card: TarotCard) -> str | None:
+    if not card.is_standard:
+        return None
+    base = "https://raw.githubusercontent.com/searge/tarot/master/assets/img/big"
+    if card.suit == "Старшие Арканы" and card.number is not None:
+        return f"{base}/maj{int(card.number):02d}.jpg"
+    prefixes = {"Кубки":"cups","Мечи":"swords","Пентакли":"pents","Жезлы":"wands"}
+    prefix = prefixes.get(card.suit)
+    if prefix and card.number is not None:
+        return f"{base}/{prefix}{int(card.number):02d}.jpg"
+    return None
+
 class DevelopmentRequest(BaseModel):
     stat: Literal["health","mana","strength","intelligence","agility","magic","luck","endurance","charisma"]
     amount: Literal[1,5]
@@ -139,7 +170,8 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
         "shop":{"date":local_date(),"items":[{"id":i.id,"name":i.name,"description":i.description,"price":i.price,
             "slot":i.slot,"rarity":i.rarity,"stat_name":i.stat_name,"stat_bonus":i.stat_bonus} for i in shop]},
         "inventory":inventory,"npcs":npcs,"media":media,
-        "is_admin": user.id in __import__("app.config", fromlist=["get_settings"]).get_settings().admins,
+        "is_admin": await has_project_admin_rights(session, user.id),
+        "is_owner": user.id in __import__("app.config", fromlist=["get_settings"]).get_settings().admins,
     }
 
 @router.post("/development")
@@ -653,14 +685,13 @@ async def duel_image(character_id:int,user=Depends(current_miniapp_user),session
 
 @router.get("/admin/theme")
 async def admin_theme(user=Depends(current_miniapp_user),session:AsyncSession=Depends(get_session)):
-    from app.config import get_settings
-    if user.id not in get_settings().admins: raise HTTPException(403,"Недостаточно прав")
+    await require_project_admin(session, user.id)
     return {"keys":sorted(THEME_KEYS),"media":{k:(f"/api/miniapp/media/{k}" if await get_system_media(session,k) else None) for k in THEME_KEYS}}
 
 @router.post("/admin/theme/{key}")
 async def admin_theme_upload(key:str,file:UploadFile=File(...),user=Depends(current_miniapp_user),session:AsyncSession=Depends(get_session)):
     from app.config import get_settings
-    if user.id not in get_settings().admins: raise HTTPException(403,"Недостаточно прав")
+    await require_project_admin(session, user.id)
     if key not in THEME_KEYS: raise HTTPException(404,"Элемент оформления не найден")
     content=await file.read()
     if not content or len(content)>10*1024*1024: raise HTTPException(400,"Файл пустой или больше 10 МБ")
@@ -680,9 +711,7 @@ async def admin_theme_delete(
     user=Depends(current_miniapp_user),
     session: AsyncSession=Depends(get_session),
 ):
-    from app.config import get_settings
-    if user.id not in get_settings().admins:
-        raise HTTPException(403, "Недостаточно прав")
+    await require_project_admin(session, user.id)
     if key not in THEME_KEYS:
         raise HTTPException(404, "Элемент оформления не найден")
     result = await session.execute(select(SystemMedia).where(SystemMedia.key == key))
@@ -690,6 +719,44 @@ async def admin_theme_delete(
     if media:
         await session.delete(media)
     return {"ok": True, "key": key}
+
+
+class ProjectAdminRequest(BaseModel):
+    telegram_id: int
+    enabled: bool
+
+
+@router.get("/admin/project-admins")
+async def project_admins(user=Depends(current_miniapp_user),session: AsyncSession=Depends(get_session)):
+    from app.config import get_settings
+    if user.id not in get_settings().admins:
+        raise HTTPException(403, "Назначать администраторов может только создатель")
+    result = await session.execute(
+        select(User, Character).outerjoin(Character, Character.user_id == User.id)
+        .order_by(User.first_name, User.telegram_id)
+    )
+    return {"users":[{
+        "telegram_id": db_user.telegram_id,
+        "username": db_user.username,
+        "first_name": db_user.first_name,
+        "character_name": character.name if character else None,
+        "is_project_admin": bool(db_user.is_admin),
+        "is_owner": db_user.telegram_id in get_settings().admins,
+    } for db_user, character in result.all()]}
+
+
+@router.post("/admin/project-admins")
+async def set_project_admin(payload: ProjectAdminRequest,user=Depends(current_miniapp_user),session: AsyncSession=Depends(get_session)):
+    from app.config import get_settings
+    if user.id not in get_settings().admins:
+        raise HTTPException(403, "Назначать администраторов может только создатель")
+    if payload.telegram_id in get_settings().admins:
+        raise HTTPException(400, "Права создателя нельзя изменить")
+    target = await database_user(session, payload.telegram_id)
+    if not target:
+        raise HTTPException(404, "Игрок не найден")
+    target.is_admin = payload.enabled
+    return {"ok":True,"telegram_id":target.telegram_id,"enabled":target.is_admin}
 
 
 @router.delete("/profile/portrait")
@@ -737,8 +804,9 @@ async def tarot_card_payload(session: AsyncSession, card: TarotCard) -> dict:
         "image_url": (
             f"/api/miniapp/tarot/cards/{card.id}/image"
             if card.image_file_id
-            else None
+            else standard_tarot_image_url(card)
         ),
+        "image_protected": bool(card.image_file_id),
     }
 
 

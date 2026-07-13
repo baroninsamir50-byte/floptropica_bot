@@ -1878,3 +1878,12 @@ body.viewer-open {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* v7.7 — tarot imagery, estate banner and project admins */
+.tarot-card-art.image-failed::after{content:"✦";display:grid;place-items:center;width:100%;height:100%;color:var(--gold);font-size:44px}
+.house-change-photo{margin-top:9px;padding:8px 10px;border:1px solid rgba(245,204,107,.25);border-radius:12px;color:var(--text);background:rgba(13,8,20,.72);font:inherit;font-size:11px;font-weight:800}
+.project-admin-panel{border-color:rgba(245,204,107,.28)}
+.project-admin-list{display:grid;gap:8px;margin-top:12px}
+.project-admin-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}
+.project-admin-row>div{min-width:0}.project-admin-row b,.project-admin-row small{display:block}.project-admin-row small{margin-top:3px;color:var(--muted);font-size:10px}.project-admin-row .btn{flex:0 0 auto;padding:9px 10px;font-size:10px}
