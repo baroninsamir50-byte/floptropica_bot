@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import SessionFactory
-from app.models import InventoryItem, ItemTemplate, OwnedNpc, Duel, Character, User
+from app.models import InventoryItem, ItemTemplate, OwnedNpc, Duel, Character, User, SystemMedia
 from app.miniapp.auth import TelegramMiniAppUser, current_miniapp_user
 from app.services import (
     buy_item, claim_work, get_character, get_daily_shop_items,
@@ -414,3 +414,43 @@ async def admin_theme_upload(key:str,file:UploadFile=File(...),user=Depends(curr
         await bot.session.close()
     await set_system_media(session,key,file_id)
     return {"ok":True,"key":key,"url":f"/api/miniapp/media/{key}"}
+
+
+@router.delete("/admin/theme/{key}")
+async def admin_theme_delete(
+    key: str,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    from app.config import get_settings
+    if user.id not in get_settings().admins:
+        raise HTTPException(403, "Недостаточно прав")
+    if key not in THEME_KEYS:
+        raise HTTPException(404, "Элемент оформления не найден")
+    result = await session.execute(select(SystemMedia).where(SystemMedia.key == key))
+    media = result.scalar_one_or_none()
+    if media:
+        await session.delete(media)
+    return {"ok": True, "key": key}
+
+
+@router.delete("/profile/portrait")
+async def delete_own_portrait(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    character.portrait_file_id = None
+    return {"ok": True}
+
+
+@router.delete("/profile/house-image")
+async def delete_own_house_image(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    if not character.house:
+        raise HTTPException(404, "Дом не найден")
+    character.house.image_file_id = None
+    return {"ok": True}

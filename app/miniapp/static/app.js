@@ -594,20 +594,150 @@ window.duelAction=async(duelId,action)=>{
   try{state.duels.active=await api(`/duels/${duelId}/action`,{method:'POST',body:JSON.stringify({action})});render();}catch(e){toast(e.message)}
 };
 
-function customizationView() {
-  if (!state.data.is_admin) return section('⚙ Кастомизация','<div class="panel">Недостаточно прав.</div>');
-  const labels={home_bg:'Фон главной',hero_bg:'Фон героя',house_bg:'Фон владения',treasury:'Фон казны',shop:'Фон магазина',development:'Фон развития',factions:'Фон фракций',map:'Карта',games_bg:'Фон игр',inventory_bg:'Фон инвентаря',loading_bg:'Фон загрузки',app_logo:'Эмблема',topbar_bg:'Верхняя панель',nav_bg:'Нижнее меню',card_texture:'Текстура карточек',frame_hero:'Рамка героя',frame_house:'Рамка дома',duel_bg:'Фон дуэли',duel_frame:'Рамка бойца',duel_vs:'Знак VS',icon_customization:'Иконка кастомизации'};
-  return section('⚙ Студия оформления',`<div class="panel"><p>Нажмите на элемент и выберите изображение. Оно сразу сохранится через Telegram и применится к Mini App.</p></div><div class="theme-grid">${Object.entries(labels).map(([key,label])=>`<label class="theme-item"><div class="theme-preview" ${state.data.media[key]?`style="background-image:url('${state.data.media[key]}')"`:''}></div><b>${label}</b><input type="file" accept="image/*" onchange="uploadTheme('${key}',this.files[0])"></label>`).join('')}</div>`);
+
+async function hydrateStudioPreviews() {
+  const nodes = [...document.querySelectorAll('[data-studio-protected]')];
+  await Promise.all(nodes.map(async node => {
+    const url = await protectedImage(node.dataset.studioProtected);
+    if (url) {
+      node.style.backgroundImage = `url("${url}")`;
+      node.classList.add('loaded');
+    }
+  }));
 }
 
-window.uploadTheme=async(key,file)=>{
-  if(!file)return;
-  const form=new FormData();form.append('file',file);
-  try{
-    const response=await fetch(`/api/miniapp/admin/theme/${key}`,{method:'POST',headers:{'X-Telegram-Init-Data':initData},body:form});
-    const body=await response.json().catch(()=>({}));if(!response.ok)throw new Error(body.detail||'Ошибка загрузки');
-    toast('Оформление обновлено');await refresh();go('customization');
-  }catch(e){toast(e.message)}
+function customizationView() {
+  if (!state.data.is_admin) {
+    return section('⚙ Кастомизация','<div class="panel">Недостаточно прав.</div>');
+  }
+
+  const labels = {
+    home_bg:'Фон главной', hero_bg:'Фон героя', house_bg:'Фон владения',
+    treasury:'Фон казны', shop:'Фон магазина', development:'Фон развития',
+    factions:'Фон фракций', map:'Карта', games_bg:'Фон игр',
+    inventory_bg:'Фон инвентаря', loading_bg:'Фон загрузки', app_logo:'Эмблема',
+    topbar_bg:'Верхняя панель', nav_bg:'Нижнее меню', card_texture:'Текстура карточек',
+    frame_hero:'Рамка героя', frame_house:'Рамка дома', duel_bg:'Фон дуэли',
+    duel_frame:'Рамка бойца', duel_vs:'Знак VS', icon_customization:'Иконка кастомизации'
+  };
+
+  const themeCards = Object.entries(labels).map(([key,label]) => {
+    const url = state.data.media[key];
+    return `<article class="theme-item">
+      <button class="theme-preview ${url ? '' : 'empty'}"
+        ${url ? `style="background-image:url('${url}')" onclick="openImageViewer('${url}')"` : ''}>
+        ${url ? '<span>Нажмите для просмотра</span>' : '<span>Изображение не задано</span>'}
+      </button>
+      <b>${label}</b>
+      <div class="theme-actions">
+        <label class="studio-btn upload">📤 Загрузить
+          <input type="file" accept="image/*" onchange="uploadTheme('${key}',this.files[0]);this.value=''">
+        </label>
+        <button class="studio-btn" onclick="previewTheme('${key}')" ${url ? '' : 'disabled'}>👁 Просмотр</button>
+        <button class="studio-btn danger" onclick="deleteTheme('${key}')" ${url ? '' : 'disabled'}>🗑 Удалить</button>
+      </div>
+    </article>`;
+  }).join('');
+
+  const portraitUrl = state.data.hero.portrait_available ? '/api/miniapp/hero-image' : null;
+  const houseUrl = state.data.house.image_available ? '/api/miniapp/house-image' : null;
+
+  return section('⚙ Студия оформления',`
+    <div class="panel studio-intro">
+      <h3>Оформление Mini App</h3>
+      <p>Загружайте, просматривайте и удаляйте изображения прямо здесь. Изменения применяются после обновления данных приложения.</p>
+    </div>
+
+    <h3 class="subheading">Мои изображения</h3>
+    <div class="theme-grid personal-media-grid">
+      <article class="theme-item">
+        <div class="theme-preview protected-preview" data-studio-protected="/hero-image">
+          <span>${portraitUrl ? 'Портрет персонажа' : 'Портрет не загружен'}</span>
+        </div>
+        <b>Портрет героя</b>
+        <div class="theme-actions">
+          <button class="studio-btn upload" onclick="openUpload('portrait')">📤 Загрузить</button>
+          <button class="studio-btn" onclick="previewProtected('/hero-image')" ${portraitUrl ? '' : 'disabled'}>👁 Просмотр</button>
+          <button class="studio-btn danger" onclick="deleteProfileImage('portrait')" ${portraitUrl ? '' : 'disabled'}>🗑 Удалить</button>
+        </div>
+      </article>
+
+      <article class="theme-item">
+        <div class="theme-preview protected-preview" data-studio-protected="/house-image">
+          <span>${houseUrl ? 'Фото владения' : 'Фото не загружено'}</span>
+        </div>
+        <b>Фотография дома</b>
+        <div class="theme-actions">
+          <button class="studio-btn upload" onclick="openUpload('house')">📤 Загрузить</button>
+          <button class="studio-btn" onclick="previewProtected('/house-image')" ${houseUrl ? '' : 'disabled'}>👁 Просмотр</button>
+          <button class="studio-btn danger" onclick="deleteProfileImage('house')" ${houseUrl ? '' : 'disabled'}>🗑 Удалить</button>
+        </div>
+      </article>
+    </div>
+
+    <h3 class="subheading">Оформление приложения</h3>
+    <div class="theme-grid">${themeCards}</div>
+  `);
+}
+
+window.uploadTheme = async (key,file) => {
+  if (!file) return;
+  const form = new FormData();
+  form.append('file',file);
+  try {
+    const response = await fetch(`/api/miniapp/admin/theme/${key}`,{
+      method:'POST',
+      headers:{'X-Telegram-Init-Data':initData},
+      body:form
+    });
+    const body = await response.json().catch(()=>({}));
+    if (!response.ok) throw new Error(body.detail || 'Ошибка загрузки');
+    toast('Оформление обновлено');
+    await refresh();
+    go('customization');
+  } catch (e) {
+    toast(e.message);
+  }
+};
+
+window.previewTheme = key => {
+  const url = state.data?.media?.[key];
+  if (url) openImageViewer(url);
+};
+
+window.deleteTheme = async key => {
+  if (!confirm('Удалить это изображение оформления?')) return;
+  try {
+    await api(`/admin/theme/${key}`, { method:'DELETE' });
+    toast('Изображение удалено');
+    await refresh();
+    go('customization');
+  } catch (e) {
+    toast(e.message);
+  }
+};
+
+window.previewProtected = async path => {
+  const url = await protectedImage(path);
+  if (url) openImageViewer(url);
+  else toast('Изображение не загружено');
+};
+
+window.deleteProfileImage = async kind => {
+  if (!confirm(kind === 'house' ? 'Удалить фотографию дома?' : 'Удалить портрет героя?')) return;
+  try {
+    const path = kind === 'house' ? '/profile/house-image' : '/profile/portrait';
+    await api(path, { method:'DELETE' });
+    const protectedPath = kind === 'house' ? '/house-image' : '/hero-image';
+    const oldUrl = state.protectedImages.get(protectedPath);
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    state.protectedImages.delete(protectedPath);
+    toast('Изображение удалено');
+    await refresh();
+    go('customization');
+  } catch (e) {
+    toast(e.message);
+  }
 };
 function gamesView() {
   const d=state.duels;
@@ -652,6 +782,7 @@ function render() {
   applyActiveScreenBackground();
   content.innerHTML = (views[state.view] || homeView)();
   hydrateProtectedImages();
+  hydrateStudioPreviews();
   const oldAdmin=document.getElementById('adminStudioButton'); if(oldAdmin) oldAdmin.remove();
   if(state.data?.is_admin && state.view!=='customization'){
     const button=document.createElement('button');button.id='adminStudioButton';button.className='admin-studio-fab';button.innerHTML=mediaUrl('icon_customization')?`<img src="${mediaUrl('icon_customization')}" alt="">`:'⚙';button.onclick=()=>go('customization');document.body.appendChild(button);
