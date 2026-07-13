@@ -15,6 +15,7 @@ from app.database import init_database, SessionFactory
 from app.middlewares import DatabaseMiddleware
 from app.routers import admin, common, economy, gameplay, games, house_defense, miniapp, profile, registration
 from app.services import seed_items
+from app.tarot_service import seed_standard_tarot
 from app.scheduler import house_attack_loop, process_due_game_tasks
 
 
@@ -109,6 +110,7 @@ async def main() -> None:
     await init_database()
     async with SessionFactory() as session:
         await seed_items(session)
+        await seed_standard_tarot(session)
 
     await asyncio.gather(
         run_web_server(),

@@ -96,6 +96,10 @@ class House(Base):
     integrity: Mapped[int] = mapped_column(Integer, default=100)
     repair_energy: Mapped[int] = mapped_column(Integer, default=0)
     last_attack_date: Mapped[str | None] = mapped_column(String(10))
+    last_cleaning_date: Mapped[str | None] = mapped_column(String(10))
+    cleanliness: Mapped[int] = mapped_column(Integer, default=100)
+    threat_level: Mapped[int] = mapped_column(Integer, default=1)
+    last_cleaning_penalty_date: Mapped[str | None] = mapped_column(String(10))
 
     owner: Mapped[Character] = relationship(back_populates="house")
 
@@ -253,3 +257,74 @@ class SystemMedia(Base):
     key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     file_id: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+
+
+class HouseRoom(Base):
+    __tablename__ = "house_rooms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    house_id: Mapped[int] = mapped_column(
+        ForeignKey("houses.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="")
+    image_file_id: Mapped[str | None] = mapped_column(Text)
+    cleanliness: Mapped[int] = mapped_column(Integer, default=100)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NpcUnit(Base):
+    __tablename__ = "npc_units"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    npc_type: Mapped[str] = mapped_column(String(24), index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    model_variant: Mapped[int] = mapped_column(Integer, default=1)
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    experience: Mapped[int] = mapped_column(Integer, default=0)
+    fatigue: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(32), default="idle", index=True)
+    assignment: Mapped[str | None] = mapped_column(String(40))
+    available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_rest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    alive: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TarotCard(Base):
+    __tablename__ = "tarot_cards"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_character_id: Mapped[int | None] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(100))
+    suit: Mapped[str] = mapped_column(String(64), default="Авторская карта")
+    number: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text, default="")
+    upright_meaning: Mapped[str] = mapped_column(Text)
+    reversed_meaning: Mapped[str] = mapped_column(Text)
+    image_file_id: Mapped[str | None] = mapped_column(Text)
+    is_standard: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TarotReading(Base):
+    __tablename__ = "tarot_readings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        index=True,
+    )
+    question: Mapped[str] = mapped_column(Text)
+    card_id: Mapped[int] = mapped_column(ForeignKey("tarot_cards.id"))
+    orientation: Mapped[str] = mapped_column(String(16))
+    prediction: Mapped[str] = mapped_column(Text)
+    reading_date: Mapped[str] = mapped_column(String(10), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

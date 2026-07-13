@@ -1292,3 +1292,511 @@ body.viewer-open {
   .theme-actions { grid-template-columns: 1fr; }
   .studio-btn { padding: 7px 5px; }
 }
+
+
+/* v7.5 — Зал Предсказаний */
+
+.tarot-hero {
+  min-height: 230px;
+  margin-bottom: 14px;
+  padding: 22px;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  border: 1px solid rgba(181,132,255,.28);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 70% 20%, rgba(181,132,255,.28), transparent 34%),
+    linear-gradient(145deg,#29153f,#0b0712);
+  background-size: cover;
+  background-position: center;
+  box-shadow: var(--shadow);
+}
+
+.tarot-hero h2 {
+  margin: 5px 0;
+  font-family: Georgia, serif;
+  font-size: 31px;
+}
+
+.tarot-question textarea,
+.tarot-upload-form input,
+.tarot-upload-form textarea {
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 12px 13px;
+  border: 1px solid rgba(245,204,107,.16);
+  border-radius: 14px;
+  outline: none;
+  color: var(--text);
+  background: rgba(8,5,14,.56);
+  font: inherit;
+}
+
+.tarot-question textarea {
+  min-height: 105px;
+  resize: vertical;
+}
+
+.tarot-gallery {
+  display: grid;
+  grid-template-columns: repeat(2,minmax(0,1fr));
+  gap: 12px;
+}
+
+.tarot-gallery-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgba(181,132,255,.2);
+  border-radius: 19px;
+  background: rgba(23,14,34,.82);
+  box-shadow: 0 14px 32px rgba(0,0,0,.25);
+}
+
+.tarot-card-art {
+  aspect-ratio: 2 / 3;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle,rgba(181,132,255,.22),transparent 48%),
+    #0d0815;
+}
+
+.tarot-card-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tarot-card-symbol {
+  font-size: 48px;
+  color: var(--gold);
+}
+
+.tarot-card-copy {
+  padding: 11px;
+}
+
+.tarot-card-copy h3 {
+  margin: 7px 0 3px;
+  font-size: 15px;
+}
+
+.tarot-card-copy small,
+.tarot-card-copy p {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tarot-gallery-card.compact .tarot-card-art {
+  aspect-ratio: 2 / 2.3;
+}
+
+.tarot-upload-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 13px;
+}
+
+.tarot-pick-screen {
+  min-height: calc(100dvh - 175px);
+  padding: 24px 14px;
+  border-radius: 27px;
+  text-align: center;
+  background:
+    linear-gradient(rgba(8,4,14,.46),rgba(8,4,14,.88)),
+    radial-gradient(circle at 50% 20%,rgba(181,132,255,.3),transparent 36%),
+    #0b0712;
+  background-size: cover;
+  background-position: center;
+}
+
+.tarot-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.tarot-back {
+  aspect-ratio: 2 / 3;
+  border: 1px solid rgba(245,204,107,.34);
+  border-radius: 17px;
+  color: var(--gold);
+  background:
+    radial-gradient(circle,rgba(181,132,255,.25),transparent 46%),
+    repeating-linear-gradient(45deg,#251338,#251338 9px,#130a20 9px,#130a20 18px);
+  background-size: cover;
+  background-position: center;
+  box-shadow: 0 14px 30px rgba(0,0,0,.38);
+  font-size: 31px;
+  transition: transform .2s ease;
+}
+
+.tarot-back:active {
+  transform: translateY(-8px) rotate(-1deg);
+}
+
+.tarot-result .tarot-gallery-card {
+  max-width: 220px;
+  margin: 12px auto;
+}
+
+.tarot-disclaimer {
+  margin-top: 13px;
+  padding: 10px 12px;
+  border-radius: 13px;
+  color: var(--muted);
+  background: rgba(255,255,255,.045);
+  font-size: 11px;
+}
+
+.tarot-standard-details summary {
+  cursor: pointer;
+  color: var(--gold);
+  font-weight: 800;
+}
+
+.tarot-standard-grid {
+  display: grid;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 8px;
+  margin-top: 13px;
+}
+
+.tarot-history {
+  display: grid;
+  gap: 8px;
+}
+
+.tarot-history-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 9px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  text-align: left;
+  color: var(--text);
+  background: rgba(255,255,255,.045);
+}
+
+.tarot-history-item small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tarot-upload-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  align-items: end;
+  padding: 12px;
+  background: rgba(3,1,6,.9);
+  backdrop-filter: blur(16px);
+}
+
+.tarot-upload-form {
+  position: relative;
+  max-height: 92dvh;
+  padding: 20px;
+  overflow-y: auto;
+  border: 1px solid rgba(181,132,255,.25);
+  border-radius: 25px;
+  background: #171021;
+}
+
+.tarot-upload-form .viewer-close {
+  top: 10px;
+  right: 10px;
+}
+
+.tarot-file-label {
+  display: block;
+  margin: 8px 0 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tarot-file-label input {
+  margin-top: 7px;
+}
+
+@media (max-width:390px) {
+  .tarot-gallery {
+    gap: 9px;
+  }
+
+  .tarot-card-copy {
+    padding: 9px;
+  }
+
+  .tarot-pick-grid {
+    gap: 7px;
+  }
+
+  .tarot-upload-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+
+/* v7.6 — владения, монстры и NPC */
+
+.estate-status .row {
+  margin: 8px 0;
+}
+
+.room-heading {
+  margin: 16px 2px 10px;
+}
+
+.room-heading h3 {
+  margin: 0;
+}
+
+.room-list {
+  display: grid;
+  gap: 11px;
+}
+
+.room-card {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 12px;
+  min-height: 112px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 19px;
+  background: rgba(22,15,33,.84);
+}
+
+.room-image {
+  min-height: 112px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle,rgba(154,108,255,.2),transparent 50%),
+    #0d0815;
+  font-size: 34px;
+}
+
+.room-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.room-card > div:last-child {
+  padding: 12px 12px 12px 0;
+}
+
+.room-card h3 {
+  margin: 0 0 5px;
+}
+
+.room-card p {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monster-arena {
+  border-color: rgba(255,93,111,.3);
+  background:
+    radial-gradient(circle at 75% 15%,rgba(255,72,91,.18),transparent 32%),
+    rgba(29,12,22,.9);
+}
+
+.monster-stage {
+  display: grid;
+  grid-template-columns: minmax(105px,35%) 1fr;
+  gap: 14px;
+  align-items: center;
+  margin: 14px 0;
+}
+
+.monster-stage img {
+  width: 100%;
+  aspect-ratio: 1 / 1.2;
+  object-fit: cover;
+  border-radius: 18px;
+  background: #130b18;
+}
+
+.monster-stage h2 {
+  margin: 0 0 5px;
+  font-size: 20px;
+}
+
+.monster-player-stats {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+  margin: 12px 0;
+  font-weight: 800;
+}
+
+.monster-actions {
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+  gap: 8px;
+}
+
+.monster-actions button,
+.npc-task-grid button {
+  min-height: 48px;
+  border: 1px solid rgba(245,204,107,.16);
+  border-radius: 13px;
+  color: var(--text);
+  background: rgba(255,255,255,.065);
+  font: inherit;
+  font-size: 12px;
+}
+
+.npc-shop {
+  margin-bottom: 12px;
+}
+
+.npc-rules p {
+  margin: 6px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.npc-list {
+  display: grid;
+  gap: 12px;
+}
+
+.npc-card {
+  display: grid;
+  grid-template-columns: 122px 1fr;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 21px;
+  background: rgba(23,15,35,.88);
+  box-shadow: 0 14px 32px rgba(0,0,0,.24);
+}
+
+.npc-card.dead {
+  opacity: .55;
+  filter: grayscale(.8);
+}
+
+.npc-model {
+  position: relative;
+  min-height: 175px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle,rgba(154,108,255,.22),transparent 48%),
+    #0d0815;
+  font-size: 45px;
+}
+
+.npc-model img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.npc-copy {
+  min-width: 0;
+  padding: 13px;
+}
+
+.npc-copy h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.npc-copy small {
+  display: block;
+  margin: 8px 0;
+  color: var(--muted);
+}
+
+.bar.fatigue > i {
+  background: linear-gradient(90deg,#65e6a8,#f5cc6b,#ff6f88);
+}
+
+.npc-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2,1fr);
+  gap: 7px;
+}
+
+@media (max-width:390px) {
+  .room-card {
+    grid-template-columns: 92px 1fr;
+  }
+
+  .npc-card {
+    grid-template-columns: 105px 1fr;
+  }
+
+  .npc-model {
+    min-height: 165px;
+  }
+
+  .monster-actions {
+    grid-template-columns: repeat(2,1fr);
+  }
+}
+
+
+/* v7.6.2 — фильтры студии и облики NPC */
+
+.studio-tabs {
+  position: sticky;
+  top: 74px;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+  margin: 12px 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: rgba(18,13,29,.94);
+  backdrop-filter: blur(14px);
+}
+
+.studio-tab {
+  border: 0;
+  border-radius: 12px;
+  padding: 9px 6px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.studio-tab.active {
+  color: var(--gold);
+  background: rgba(154,108,255,.18);
+}
+
+.npc-appearance-item .theme-preview {
+  background-position: top center;
+}
+
+.npc-appearance-item > b {
+  min-height: 34px;
+  display: block;
+  font-size: 12px;
+}

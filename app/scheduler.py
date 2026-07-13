@@ -4,12 +4,12 @@ from random import choice, randint
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import SessionFactory
-from app.keyboards import house_attack_keyboard
-from app.models import Character, House, HouseAttack, OwnedNpc, User
+from app.models import Character, House, HouseAttack, NpcUnit, User
 
 _task_lock = asyncio.Lock()
 
@@ -17,8 +17,8 @@ ENEMIES = [
     ("🐉 Молодой дракон", "dragon", 42),
     ("👹 Болотный урод", "monster", 30),
     ("🌀 Живая аномалия", "anomaly", 38),
-    ("🧟 Отряд проклятых", "undead", 34),
-    ("🔥 Огненный бес", "demon", 36),
+    ("🧟 Отряд проклятых", "monster", 34),
+    ("🔥 Огненный бес", "monster", 36),
 ]
 
 
@@ -30,6 +30,14 @@ async def send_group(bot: Bot, text: str, reply_markup=None):
         await bot.send_message(chat_id, text, reply_markup=reply_markup)
     except Exception:
         pass
+
+
+async def attack_keyboard(bot: Bot, attack_id: int):
+    me = await bot.get_me()
+    url = f"https://t.me/{me.username}?startapp=attack_{attack_id}"
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="⚔ Открыть бой в Mini App", url=url)
+    ]])
 
 
 async def create_daily_attacks(bot: Bot):
@@ -56,13 +64,18 @@ async def create_daily_attacks(bot: Bot):
         )
         for house, character, user in result.all():
             enemy_name, enemy_type, base_power = choice(ENEMIES)
-            power = base_power + character.level * 2 + randint(-4, 8)
+            power = (
+                base_power
+                + character.level * 2
+                + house.threat_level * 5
+                + randint(-3, 7)
+            )
             attack = HouseAttack(
                 house_id=house.id,
                 enemy_name=enemy_name,
                 enemy_type=enemy_type,
                 enemy_power=power,
-                enemy_hp=55 + power,
+                enemy_hp=60 + power * 2,
                 response_deadline=now + timedelta(minutes=10),
             )
             house.last_attack_date = today
@@ -79,12 +92,11 @@ async def create_daily_attacks(bot: Bot):
                 f"{enemy_name} атакует <b>{house.name}</b>.\n"
                 f"Владелец: {mention}\n"
                 f"Сила угрозы: {power}\n"
+                f"Уровень угрозы владения: {house.threat_level}\n"
                 f"Прочность дома: {house.integrity}/100\n\n"
-                "Владелец может защитить дом лично или отправить стражу. "
-                "Любой зарегистрированный гражданин может прийти на помощь.\n\n"
-                "Если дом спасёт друг, помощник получит очки развития, "
-                "но владение всё равно потеряет 10 прочности.",
-                house_attack_keyboard(attack.id),
+                "У владельца есть 10 минут, чтобы открыть Mini App и вступить в бой. "
+                "Если ответа не будет, свободные стражники начнут сражение автоматически.",
+                await attack_keyboard(bot, attack.id),
             )
         await session.commit()
 
@@ -103,23 +115,33 @@ async def resolve_expired_waiting(bot: Bot):
         )
         for attack, house, owner in result.all():
             guard_result = await session.execute(
-                select(OwnedNpc.quantity).where(
-                    OwnedNpc.character_id == owner.id,
-                    OwnedNpc.npc_type == "guard",
-                )
+                select(NpcUnit).where(
+                    NpcUnit.character_id == owner.id,
+                    NpcUnit.npc_type == "guard",
+                    NpcUnit.alive.is_(True),
+                    NpcUnit.status == "idle",
+                ).order_by(NpcUnit.level.desc(), NpcUnit.id)
             )
-            guards = guard_result.scalar_one_or_none() or 0
-            if guards > 0:
+            guards = list(guard_result.scalars())
+            if guards:
+                used = guards[:8]
                 attack.status = "guards_fighting"
-                attack.guards_used = min(guards, 4)
-                hours = randint(2, 4)
-                attack.guard_finish_at = now + timedelta(hours=hours)
+                attack.guards_used = len(used)
+                minutes = max(5, round(30 - (len(used) - 1) * 3.5))
+                avg_level = sum(g.level for g in used) / len(used)
+                minutes = max(4, round(minutes - max(0, avg_level - 1) * 1.5))
+                attack.guard_finish_at = now + timedelta(minutes=minutes)
+                for guard in used:
+                    guard.status = "fighting"
+                    guard.assignment = f"attack:{attack.id}"
+                    guard.available_at = attack.guard_finish_at
+                    guard.fatigue = min(100, guard.fatigue + 18)
+
                 await send_group(
                     bot,
-                    f"👮 Владелец и друзья не вступили в бой вовремя.\n"
-                    f"{attack.guards_used} стражника автоматически защищают "
-                    f"<b>{house.name}</b> от {attack.enemy_name}.\n"
-                    f"Результат будет через {hours} ч."
+                    f"👮 Владелец не ответил вовремя.\n"
+                    f"{len(used)} стражника автоматически защищают <b>{house.name}</b>.\n"
+                    f"Расчётное время боя: {minutes} мин."
                 )
             else:
                 damage = randint(18, 35)
@@ -127,6 +149,7 @@ async def resolve_expired_waiting(bot: Bot):
                 attack.damage_done = damage
                 attack.status = "enemy_won"
                 attack.finished_at = now
+                house.threat_level += 1
                 await send_group(
                     bot,
                     f"💥 Никто не защитил <b>{house.name}</b>.\n"
@@ -140,25 +163,53 @@ async def resolve_guard_battles(bot: Bot):
     now = datetime.now(timezone.utc)
     async with SessionFactory() as session:
         result = await session.execute(
-            select(HouseAttack, House)
+            select(HouseAttack, House, Character)
             .join(House, House.id == HouseAttack.house_id)
+            .join(Character, Character.id == House.owner_id)
             .where(
                 HouseAttack.status == "guards_fighting",
                 HouseAttack.guard_finish_at <= now,
             )
         )
-        for attack, house in result.all():
-            chance = min(
-                90,
-                25 + attack.guards_used * 14 + house.defense // 2
-                - max(0, attack.enemy_power - 30) // 2,
+        for attack, house, owner in result.all():
+            guard_result = await session.execute(
+                select(NpcUnit).where(
+                    NpcUnit.character_id == owner.id,
+                    NpcUnit.npc_type == "guard",
+                    NpcUnit.assignment == f"attack:{attack.id}",
+                    NpcUnit.alive.is_(True),
+                )
             )
-            chance = max(10, chance)
+            guards = list(guard_result.scalars())
+            avg_level = (
+                sum(g.level for g in guards) / len(guards)
+                if guards else 1
+            )
+            chance = min(
+                94,
+                28
+                + len(guards) * 11
+                + int(avg_level * 5)
+                + house.defense // 2
+                - max(0, attack.enemy_power - 35) // 2,
+            )
+            chance = max(8, chance)
+
+            for guard in guards:
+                guard.status = "idle"
+                guard.assignment = None
+                guard.available_at = None
+                guard.experience += 10 + attack.enemy_power // 10
+                if guard.experience >= 40 * guard.level:
+                    guard.experience -= 40 * guard.level
+                    guard.level += 1
+
             if randint(1, 100) <= chance:
                 attack.status = "guards_won"
                 attack.finished_at = now
                 energy = randint(5, 10)
                 house.repair_energy += energy
+                house.threat_level += 1
                 await send_group(
                     bot,
                     f"🏆 Стража владения <b>{house.name}</b> побеждает "
@@ -172,6 +223,7 @@ async def resolve_guard_battles(bot: Bot):
                 attack.damage_done = damage
                 attack.status = "guards_lost"
                 attack.finished_at = now
+                house.threat_level += 1
                 await send_group(
                     bot,
                     f"⚠ Стража <b>{house.name}</b> проиграла бой.\n"
@@ -181,11 +233,67 @@ async def resolve_guard_battles(bot: Bot):
         await session.commit()
 
 
+async def finish_npc_tasks():
+    now = datetime.now(timezone.utc)
+    async with SessionFactory() as session:
+        result = await session.execute(
+            select(NpcUnit).where(
+                NpcUnit.alive.is_(True),
+                NpcUnit.available_at.is_not(None),
+                NpcUnit.available_at <= now,
+                NpcUnit.status.in_(["working", "resting", "training"]),
+            )
+        )
+        for npc in result.scalars():
+            if npc.status == "resting":
+                npc.fatigue = max(0, npc.fatigue - 70)
+                npc.last_rest_at = now
+            elif npc.status == "training":
+                npc.level += 1
+                npc.experience = 0
+            npc.status = "idle"
+            npc.assignment = None
+            npc.available_at = None
+
+        exhausted_result = await session.execute(
+            select(NpcUnit).where(
+                NpcUnit.npc_type == "peasant",
+                NpcUnit.alive.is_(True),
+                NpcUnit.fatigue >= 100,
+                NpcUnit.status != "resting",
+            )
+        )
+        for npc in exhausted_result.scalars():
+            reference = npc.last_rest_at or npc.created_at
+            if reference and now - reference >= timedelta(hours=24):
+                npc.alive = False
+                npc.status = "dead"
+        await session.commit()
+
+
+async def apply_cleaning_penalties():
+    settings = get_settings()
+    today = datetime.now(ZoneInfo(settings.timezone)).date().isoformat()
+    async with SessionFactory() as session:
+        result = await session.execute(select(House))
+        for house in result.scalars():
+            if house.last_cleaning_penalty_date == today:
+                continue
+            if house.last_cleaning_date != today:
+                house.cleanliness = max(0, house.cleanliness - 20)
+                if house.cleanliness <= 40:
+                    house.integrity = max(0, house.integrity - 3)
+            house.last_cleaning_penalty_date = today
+        await session.commit()
+
+
 async def process_due_game_tasks(bot: Bot) -> dict[str, str]:
     async with _task_lock:
         await create_daily_attacks(bot)
         await resolve_expired_waiting(bot)
         await resolve_guard_battles(bot)
+        await finish_npc_tasks()
+        await apply_cleaning_penalties()
     return {
         "status": "ok",
         "processed_at": datetime.now(timezone.utc).isoformat(),

@@ -11,6 +11,11 @@ const state = {
   data: null,
   view: "home",
   protectedImages: new Map(),
+  tarot: null,
+  tarotQuestion: "",
+  tarotOffered: null,
+  estate: null,
+  npcs: null,
   duels: null,
   duelStyle: "guardian",
   duelPoll: null
@@ -182,6 +187,8 @@ function applyActiveScreenBackground() {
     factions: "factions",
     map: "map",
     games: "games_bg",
+    tarot: "tarot_bg",
+    npcs: "npc_bg",
     inventory: "inventory_bg",
     more: "home_bg"
   };
@@ -245,6 +252,8 @@ function homeView() {
         ${quick("🎲", "Игры", "Дуэли и походы", "games", "icon_games")}
         ${quick("🚩", "Фракции", h.faction, "factions", "icon_factions")}
         ${quick("🎒", "Снаряжение", `${d.inventory.length} предметов`, "inventory", "icon_inventory")}
+        ${quick("🔮", "Зал Предсказаний", "Неограниченные расклады", "tarot", "icon_tarot")}
+        ${quick("👥", "NPC", "Стражники и крестьяне", "npcs", "icon_npc")}
       </div>
     </div>`;
 }
@@ -322,25 +331,84 @@ function heroView() {
     </div>`);
 }
 
+async function loadEstate(silent=false) {
+  try {
+    state.estate = await api("/estate");
+    if (!silent) render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function roomCard(room) {
+  return `<article class="room-card">
+    <div class="room-image">
+      ${room.image_url
+        ? `<img class="image-loading" data-protected-image="/estate/rooms/${room.id}/image" alt="${room.name}">`
+        : `<span>🚪</span>`}
+    </div>
+    <div>
+      <h3>${room.name}</h3>
+      <p>${room.description || "Личная комната владения."}</p>
+      <small>Чистота: ${room.cleanliness}/100</small>
+    </div>
+  </article>`;
+}
+
+function monsterBattle(attack) {
+  const fighting = attack.status === "player_fighting";
+  const waiting = attack.status === "waiting";
+  return `<div class="monster-arena panel">
+    <div class="eyebrow">НАПАДЕНИЕ НА ВЛАДЕНИЕ</div>
+    <div class="monster-stage">
+      <img src="${attack.enemy_image_url}" alt="${attack.enemy_name}" onerror="this.style.display='none'">
+      <div>
+        <h2>${attack.enemy_name}</h2>
+        <p>Сила: ${attack.enemy_power}</p>
+        <div class="stat-head"><span>❤️ Враг</span><b>${attack.enemy_hp}</b></div>
+        <div class="bar"><i style="width:${Math.min(100,attack.enemy_hp)}%"></i></div>
+      </div>
+    </div>
+    ${waiting ? `<button class="btn gold" onclick="startMonsterFight()">⚔ Вступить в бой</button>` : ""}
+    ${attack.status === "guards_fighting" ? `<div class="badge">👮 Стражники уже сражаются</div>` : ""}
+    ${fighting ? `
+      <div class="monster-player-stats">
+        <span>❤️ ${attack.player_hp}</span>
+        <span>🔮 ${attack.player_mana}</span>
+      </div>
+      <div class="monster-actions">
+        <button onclick="monsterAction('attack')">⚔ Атака</button>
+        <button onclick="monsterAction('magic')">✨ Магия</button>
+        <button onclick="monsterAction('defend')">🛡 Защита</button>
+        <button onclick="monsterAction('dodge')">🏃 Уклонение</button>
+        <button onclick="monsterAction('critical')">💥 Крит</button>
+        <button onclick="monsterAction('potion')">🧪 Зелье</button>
+      </div>` : ""}
+  </div>`;
+}
+
 function houseView() {
   const h = state.data.house;
+  const estate = state.estate;
 
   if (!h.name) {
     return section("🏰 Владение", `<div class="panel muted">Дом не найден</div>`);
   }
+  if (!estate) {
+    setTimeout(() => loadEstate(), 0);
+    return section("🏰 Владение", `<div class="panel center-panel">Загружаем владение…</div>`);
+  }
 
+  const roomLimit = estate.room_limit;
+  const rooms = estate.rooms.map(roomCard).join("");
   return section("🏰 Владение", `
     <div class="house-photo-stage" ${bgStyle("house_bg")}>
       ${h.image_available ? `
-        <img
-          class="house-photo image-loading"
-          data-protected-image="/house-image"
-          alt="${h.name}">
+        <img class="house-photo image-loading" data-protected-image="/house-image" alt="${h.name}">
       ` : `
         <div class="upload-placeholder house-upload">
           <div class="upload-symbol">🏰</div>
           <h3>Фото владения не загружено</h3>
-          <p>Добавьте изображение дома через личный чат с ботом.</p>
           <button class="btn gold" onclick="openUpload('house')">Загрузить</button>
         </div>
       `}
@@ -352,24 +420,83 @@ function houseView() {
       </div>
     </div>
 
-    <div class="panel">
-      <p>${h.description || ""}</p>
+    ${estate.attack ? monsterBattle(estate.attack) : ""}
 
-      <div class="row"><span>⭐ Уровень</span><b>${h.level}</b></div>
-      <div class="row"><span>🛡 Защита</span><b>${h.defense}</b></div>
-      <div class="row"><span>✨ Энергия ремонта</span><b>${h.repair_energy}</b></div>
-
-      <div class="stat">
-        <div class="stat-head">
-          <span>🏗 Прочность</span>
-          <b>${h.integrity}/100</b>
-        </div>
-        <div class="bar"><i style="width:${h.integrity}%"></i></div>
+    <div class="panel estate-status">
+      <div class="row"><span>🏗 Прочность</span><b>${h.integrity}/100</b></div>
+      <div class="row"><span>🧹 Чистота</span><b>${estate.house.cleanliness}/100</b></div>
+      <div class="row"><span>👹 Уровень угрозы</span><b>${estate.house.threat_level}</b></div>
+      <div class="action-grid">
+        <button class="btn gold" onclick="cleanEstate('self')" ${estate.house.cleaning_available ? "" : "disabled"}>Убраться самому</button>
+        <button class="btn secondary" onclick="cleanEstate('peasant')" ${estate.house.cleaning_available ? "" : "disabled"}>Отправить крестьянина</button>
       </div>
+    </div>
 
-      
-    </div>`);
+    <div class="row room-heading">
+      <h3>🚪 Комнаты · ${estate.rooms.length}/${roomLimit}</h3>
+      <button class="btn secondary" onclick="openRoomUpload()" ${estate.rooms.length >= roomLimit ? "disabled" : ""}>＋ Добавить</button>
+    </div>
+    <div class="room-list">${rooms || '<div class="panel muted">Добавьте первую комнату.</div>'}</div>
+  `);
 }
+
+window.startMonsterFight = async () => {
+  try {
+    await api("/estate/attack/start", {method:"POST"});
+    toast("Бой начался");
+    await loadEstate(true);
+    render();
+  } catch (error) { toast(error.message); }
+};
+
+window.monsterAction = async action => {
+  try {
+    const result = await api("/estate/attack/action", {
+      method:"POST", body:JSON.stringify({action})
+    });
+    toast(`${result.player_log || ""} ${result.enemy_log || ""}`.trim());
+    await refresh();
+    await loadEstate(true);
+    render();
+  } catch (error) { toast(error.message); }
+};
+
+window.cleanEstate = async method => {
+  try {
+    await api("/estate/clean", {method:"POST", body:JSON.stringify({method})});
+    toast("Уборка завершена");
+    await loadEstate(true);
+    render();
+  } catch (error) { toast(error.message); }
+};
+
+window.openRoomUpload = () => {
+  const modal=document.createElement("div");
+  modal.className="tarot-upload-modal"; modal.id="roomUploadModal";
+  modal.innerHTML=`<form class="tarot-upload-form" onsubmit="uploadRoom(event)">
+    <button type="button" class="viewer-close" onclick="closeRoomUpload()">✕</button>
+    <h2>Новая комната</h2>
+    <input name="name" maxlength="100" placeholder="Название комнаты" required>
+    <textarea name="description" maxlength="2000" placeholder="Описание"></textarea>
+    <label class="tarot-file-label">Изображение комнаты
+      <input name="file" type="file" accept="image/*">
+    </label>
+    <button class="btn gold">Добавить комнату</button>
+  </form>`;
+  document.body.appendChild(modal); document.body.classList.add("viewer-open");
+};
+window.closeRoomUpload=()=>{$("roomUploadModal")?.remove();document.body.classList.remove("viewer-open")};
+window.uploadRoom=async event=>{
+  event.preventDefault();
+  try{
+    const response=await fetch("/api/miniapp/estate/rooms",{
+      method:"POST",headers:{"X-Telegram-Init-Data":initData},body:new FormData(event.currentTarget)
+    });
+    const body=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(body.detail||"Ошибка");
+    closeRoomUpload(); toast("Комната добавлена"); await loadEstate(true); render();
+  }catch(error){toast(error.message)}
+};
 
 function developmentView() {
   const h = state.data.hero;
@@ -618,12 +745,140 @@ function customizationView() {
     inventory_bg:'Фон инвентаря', loading_bg:'Фон загрузки', app_logo:'Эмблема',
     topbar_bg:'Верхняя панель', nav_bg:'Нижнее меню', card_texture:'Текстура карточек',
     frame_hero:'Рамка героя', frame_house:'Рамка дома', duel_bg:'Фон дуэли',
-    duel_frame:'Рамка бойца', duel_vs:'Знак VS', icon_customization:'Иконка кастомизации'
+    duel_frame:'Рамка бойца', duel_vs:'Знак VS', icon_customization:'Иконка кастомизации',
+    tarot_bg:'Фон Зала Предсказаний', tarot_back:'Рубашка Таро', icon_tarot:'Иконка Таро',
+    npc_bg:'Фон NPC', icon_npc:'Иконка NPC', room_bg:'Фон комнат',
+    enemy_dragon_1:'Дракон 1',enemy_dragon_2:'Дракон 2',enemy_dragon_3:'Дракон 3',
+    enemy_monster_1:'Монстр 1',enemy_monster_2:'Монстр 2',enemy_monster_3:'Монстр 3',
+    enemy_anomaly_1:'Аномалия 1',enemy_anomaly_2:'Аномалия 2',enemy_anomaly_3:'Аномалия 3',
+    guard_model_1:'Стражник 1',guard_model_2:'Стражник 2',guard_model_3:'Стражник 3',
+    peasant_model_1:'Крестьянин 1',peasant_model_2:'Крестьянин 2',peasant_model_3:'Крестьянин 3',
+    npc_peasant_1:'Крестьянин — облик 1',
+    npc_peasant_2:'Крестьянин — облик 2',
+    npc_peasant_3:'Крестьянин — облик 3',
+    npc_farmer_1:'Фермер — облик 1',
+    npc_farmer_2:'Фермер — облик 2',
+    npc_farmer_3:'Фермер — облик 3',
+    npc_gardener_1:'Садовник — облик 1',
+    npc_gardener_2:'Садовник — облик 2',
+    npc_gardener_3:'Садовник — облик 3',
+    npc_forester_1:'Лесник — облик 1',
+    npc_forester_2:'Лесник — облик 2',
+    npc_forester_3:'Лесник — облик 3',
+    npc_miner_1:'Шахтёр — облик 1',
+    npc_miner_2:'Шахтёр — облик 2',
+    npc_miner_3:'Шахтёр — облик 3',
+    npc_fisher_1:'Рыбак — облик 1',
+    npc_fisher_2:'Рыбак — облик 2',
+    npc_fisher_3:'Рыбак — облик 3',
+    npc_cook_1:'Повар — облик 1',
+    npc_cook_2:'Повар — облик 2',
+    npc_cook_3:'Повар — облик 3',
+    npc_recruit_1:'Новобранец — облик 1',
+    npc_recruit_2:'Новобранец — облик 2',
+    npc_recruit_3:'Новобранец — облик 3',
+    npc_guard_1:'Стражник — облик 1',
+    npc_guard_2:'Стражник — облик 2',
+    npc_guard_3:'Стражник — облик 3',
+    npc_veteran_1:'Ветеран — облик 1',
+    npc_veteran_2:'Ветеран — облик 2',
+    npc_veteran_3:'Ветеран — облик 3',
+    npc_archer_1:'Лучник — облик 1',
+    npc_archer_2:'Лучник — облик 2',
+    npc_archer_3:'Лучник — облик 3',
+    npc_rider_1:'Всадник — облик 1',
+    npc_rider_2:'Всадник — облик 2',
+    npc_rider_3:'Всадник — облик 3',
+    npc_paladin_1:'Паладин — облик 1',
+    npc_paladin_2:'Паладин — облик 2',
+    npc_paladin_3:'Паладин — облик 3',
+    npc_dragon_tamer_1:'Укротитель драконов — облик 1',
+    npc_dragon_tamer_2:'Укротитель драконов — облик 2',
+    npc_dragon_tamer_3:'Укротитель драконов — облик 3',
+    npc_mage_1:'Маг — облик 1',
+    npc_mage_2:'Маг — облик 2',
+    npc_mage_3:'Маг — облик 3',
+    npc_seer_1:'Провидец — облик 1',
+    npc_seer_2:'Провидец — облик 2',
+    npc_seer_3:'Провидец — облик 3',
+    npc_alchemist_1:'Алхимик — облик 1',
+    npc_alchemist_2:'Алхимик — облик 2',
+    npc_alchemist_3:'Алхимик — облик 3',
+    npc_exorcist_1:'Экзорцист — облик 1',
+    npc_exorcist_2:'Экзорцист — облик 2',
+    npc_exorcist_3:'Экзорцист — облик 3',
+    npc_archmage_1:'Архимаг — облик 1',
+    npc_archmage_2:'Архимаг — облик 2',
+    npc_archmage_3:'Архимаг — облик 3',
+    npc_merchant_1:'Торговец — облик 1',
+    npc_merchant_2:'Торговец — облик 2',
+    npc_merchant_3:'Торговец — облик 3',
+    npc_banker_1:'Банкир — облик 1',
+    npc_banker_2:'Банкир — облик 2',
+    npc_banker_3:'Банкир — облик 3',
+    npc_quartermaster_1:'Интендант — облик 1',
+    npc_quartermaster_2:'Интендант — облик 2',
+    npc_quartermaster_3:'Интендант — облик 3',
+    npc_treasurer_1:'Казначей — облик 1',
+    npc_treasurer_2:'Казначей — облик 2',
+    npc_treasurer_3:'Казначей — облик 3',
+    npc_judge_1:'Судья — облик 1',
+    npc_judge_2:'Судья — облик 2',
+    npc_judge_3:'Судья — облик 3',
+    npc_scribe_1:'Писарь — облик 1',
+    npc_scribe_2:'Писарь — облик 2',
+    npc_scribe_3:'Писарь — облик 3',
+    npc_advisor_1:'Советник — облик 1',
+    npc_advisor_2:'Советник — облик 2',
+    npc_advisor_3:'Советник — облик 3',
+    npc_chancellor_1:'Канцлер — облик 1',
+    npc_chancellor_2:'Канцлер — облик 2',
+    npc_chancellor_3:'Канцлер — облик 3',
+    npc_bard_1:'Бард — облик 1',
+    npc_bard_2:'Бард — облик 2',
+    npc_bard_3:'Бард — облик 3',
+    npc_artist_1:'Художник — облик 1',
+    npc_artist_2:'Художник — облик 2',
+    npc_artist_3:'Художник — облик 3',
+    npc_librarian_1:'Библиотекарь — облик 1',
+    npc_librarian_2:'Библиотекарь — облик 2',
+    npc_librarian_3:'Библиотекарь — облик 3',
+    npc_architect_1:'Архитектор — облик 1',
+    npc_architect_2:'Архитектор — облик 2',
+    npc_architect_3:'Архитектор — облик 3',
+    npc_dog_1:'Пёс — облик 1',
+    npc_dog_2:'Пёс — облик 2',
+    npc_dog_3:'Пёс — облик 3',
+    npc_cat_1:'Кот — облик 1',
+    npc_cat_2:'Кот — облик 2',
+    npc_cat_3:'Кот — облик 3',
+    npc_falcon_1:'Сокол — облик 1',
+    npc_falcon_2:'Сокол — облик 2',
+    npc_falcon_3:'Сокол — облик 3',
+    npc_small_dragon_1:'Маленький дракон — облик 1',
+    npc_small_dragon_2:'Маленький дракон — облик 2',
+    npc_small_dragon_3:'Маленький дракон — облик 3',
+    npc_royal_architect_1:'Королевский архитектор — облик 1',
+    npc_royal_architect_2:'Королевский архитектор — облик 2',
+    npc_royal_architect_3:'Королевский архитектор — облик 3',
+    npc_great_magister_1:'Великий магистр — облик 1',
+    npc_great_magister_2:'Великий магистр — облик 2',
+    npc_great_magister_3:'Великий магистр — облик 3',
+    npc_royal_general_1:'Генерал Королевства — облик 1',
+    npc_royal_general_2:'Генерал Королевства — облик 2',
+    npc_royal_general_3:'Генерал Королевства — облик 3',
+    npc_forest_keeper_1:'Хранитель леса — облик 1',
+    npc_forest_keeper_2:'Хранитель леса — облик 2',
+    npc_forest_keeper_3:'Хранитель леса — облик 3',
+    npc_angel_of_light_1:'Ангел света — облик 1',
+    npc_angel_of_light_2:'Ангел света — облик 2',
+    npc_angel_of_light_3:'Ангел света — облик 3'
   };
 
   const themeCards = Object.entries(labels).map(([key,label]) => {
     const url = state.data.media[key];
-    return `<article class="theme-item">
+    const npcAppearance = key.startsWith('npc_') && key !== 'npc_bg';
+    return `<article class="theme-item ${npcAppearance ? 'npc-appearance-item' : 'base-theme-item'}">
       <button class="theme-preview ${url ? '' : 'empty'}"
         ${url ? `style="background-image:url('${url}')" onclick="openImageViewer('${url}')"` : ''}>
         ${url ? '<span>Нажмите для просмотра</span>' : '<span>Изображение не задано</span>'}
@@ -700,6 +955,19 @@ window.uploadTheme = async (key,file) => {
   }
 };
 
+
+window.filterStudio = (mode, button) => {
+  document.querySelectorAll(".studio-tab").forEach(item => item.classList.remove("active"));
+  button?.classList.add("active");
+  document.querySelectorAll(".theme-item").forEach(item => {
+    const isNpc = item.classList.contains("npc-appearance-item");
+    item.classList.toggle(
+      "hidden",
+      (mode === "npc" && !isNpc) || (mode === "base" && isNpc)
+    );
+  });
+};
+
 window.previewTheme = key => {
   const url = state.data?.media?.[key];
   if (url) openImageViewer(url);
@@ -739,6 +1007,56 @@ window.deleteProfileImage = async kind => {
     toast(e.message);
   }
 };
+
+async function loadNpcs(silent=false){
+  try{state.npcs=await api("/npcs");if(!silent)render()}catch(error){toast(error.message)}
+}
+function npcCard(npc){
+  const dead=!npc.alive;
+  return `<article class="npc-card ${dead?'dead':''}">
+    <div class="npc-model">
+      <img src="${npc.model_url}" alt="${npc.name}" onerror="this.style.display='none'">
+      <span>${npc.type==='guard'?'🛡':'🌾'}</span>
+    </div>
+    <div class="npc-copy">
+      <div class="row"><h3>${npc.name}</h3><span class="badge">Ур. ${npc.level}</span></div>
+      <div class="stat-head"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
+      <div class="bar fatigue"><i style="width:${npc.fatigue}%"></i></div>
+      <small>${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
+      ${!dead?npc.type==='guard'?`
+        <div class="action-grid">
+          <button class="btn secondary" onclick="npcAction(${npc.id},'school')">🏫 Школа</button>
+          <button class="btn gold" onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
+        </div>`:`
+        <div class="npc-task-grid">
+          <button onclick="npcAction(${npc.id},'field')">🌾 Поле</button>
+          <button onclick="npcAction(${npc.id},'clean')">🧹 Уборка</button>
+          <button onclick="npcAction(${npc.id},'garden')">🌿 Сад</button>
+          <button onclick="npcAction(${npc.id},'toilets')">🚽 Туалеты</button>
+          <button onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
+        </div>`:''}
+    </div>
+  </article>`;
+}
+function npcsView(){
+  if(!state.npcs){setTimeout(()=>loadNpcs(),0);return section("👥 NPC",'<div class="panel">Загружаем NPC…</div>')}
+  const d=state.npcs;
+  return section("👥 NPC",`
+    <div class="section-visual-large" ${bgStyle("npc_bg")}><div class="visual-overlay">
+      <div class="eyebrow">СЛУГИ И ЗАЩИТНИКИ</div><h3>Управление NPC</h3>
+      <p>Стражники защищают дом, крестьяне выполняют хозяйственные поручения.</p>
+    </div></div>
+    <div class="npc-shop action-grid">
+      <button class="btn gold" onclick="buyNpc('guard')">🛡 Стражник · ${d.prices.guard} 🪙</button>
+      <button class="btn gold" onclick="buyNpc('peasant')">🌾 Крестьянин · ${d.prices.peasant} 🪙</button>
+    </div>
+    <div class="panel npc-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p><p>${d.rules.school}</p></div>
+    <div class="npc-list">${d.units.map(npcCard).join("")||'<div class="panel muted">У вас пока нет NPC.</div>'}</div>
+  `)
+}
+window.buyNpc=async npc_type=>{try{await api("/npcs/buy",{method:"POST",body:JSON.stringify({npc_type})});toast("NPC приобретён");await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
+window.npcAction=async(npc_id,action)=>{try{const r=await api("/npcs/action",{method:"POST",body:JSON.stringify({npc_id,action})});toast(r.message);await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
+
 function gamesView() {
   const d=state.duels;
   if (!d) {
@@ -751,6 +1069,219 @@ function gamesView() {
   return section("⚔ Королевская дуэль", `<div class="panel duel-intro" ${bgStyle('duel_bg')}><div class="eyebrow">50% РАЗВИТИЕ · 50% СУДЬБА</div><h2>Арена Флоптропики</h2><p>Уровень, характеристики и экипировка дают половину результата. Вторая половина каждого действия определяется удачей и случайностью.</p>${duelStyleSelect()}</div>${incoming?`<h3 class="subheading">Входящие вызовы</h3><div class="cards">${incoming}</div>`:''}<h3 class="subheading">Выберите соперника</h3><div class="duel-player-list">${players||'<div class="panel">Других игроков пока нет.</div>'}</div>${d.outgoing.length?`<div class="panel">⏳ Ожидают ответа: ${d.outgoing.map(x=>x.opponent.name).join(', ')}</div>`:''}`);
 }
 
+
+
+async function loadTarotCenter() {
+  try {
+    state.tarot = await api("/tarot");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
+function tarotCardVisual(card, compact=false) {
+  const image = card.image_url
+    ? `<img class="tarot-card-image image-loading" data-protected-image="/tarot/cards/${card.id}/image" alt="${card.name}">`
+    : `<div class="tarot-card-symbol">✦</div>`;
+  return `<article class="tarot-gallery-card ${compact ? "compact" : ""}">
+    <div class="tarot-card-art">${image}</div>
+    <div class="tarot-card-copy">
+      <span class="badge">${card.suit}</span>
+      <h3>${card.name}</h3>
+      <small>Добавил: ${card.owner_name}</small>
+      ${compact ? "" : `<p>${card.description || card.upright_meaning}</p>`}
+    </div>
+  </article>`;
+}
+
+function tarotReadingResult(reading) {
+  const orientation = reading.orientation === "upright"
+    ? "Прямое положение"
+    : "Перевёрнутое положение";
+  return `<div class="tarot-result panel">
+    <div class="eyebrow">ПРЕДСКАЗАНИЕ НА ${reading.reading_date}</div>
+    ${tarotCardVisual(reading.card, true)}
+    <h3>${orientation}</h3>
+    <p><b>Ваш вопрос:</b> ${reading.question}</p>
+    <p>${reading.prediction}</p>
+    <div class="tarot-disclaimer">🔮 ${state.tarot.disclaimer}</div>
+  </div>`;
+}
+
+function tarotView() {
+  const data = state.tarot;
+  if (!data) {
+    setTimeout(() => loadTarotCenter(), 0);
+    return section("🔮 Зал Предсказаний",
+      `<div class="panel center-panel">Подготавливаем колоду…</div>`);
+  }
+
+  const userCards = data.cards.filter(card => !card.is_standard);
+  const standardCards = data.cards.filter(card => card.is_standard);
+
+  const gallery = userCards.length
+    ? userCards.map(card => tarotCardVisual(card)).join("")
+    : `<div class="panel muted">Игроки ещё не добавили авторские карты.</div>`;
+
+  const history = data.history.length
+    ? data.history.slice(0, 8).map(item => `
+      <button class="tarot-history-item" onclick='showTarotHistory(${JSON.stringify(item.id)})'>
+        <b>${item.card.name}</b>
+        <span>${item.reading_date}</span>
+        <small>${item.question}</small>
+      </button>`).join("")
+    : `<div class="muted">История раскладов пока пуста.</div>`;
+
+  const readingArea = `
+    ${data.today_reading ? tarotReadingResult(data.today_reading) : ""}
+    <div class="tarot-question panel">
+      <div class="eyebrow">НОВЫЙ РАСКЛАД</div>
+      <h2>Что вы хотите спросить у колоды?</h2>
+      <textarea id="tarotQuestionInput" maxlength="500"
+        placeholder="Например: что сегодня важно для моей фракции?">${state.tarotQuestion || ""}</textarea>
+      <button class="btn gold" onclick="offerTarotCards()">Перемешать колоду</button>
+    </div>`;
+
+  return section("🔮 Зал Предсказаний", `
+    <div class="tarot-hero" ${bgStyle("tarot_bg")}>
+      <div>
+        <div class="eyebrow">МАГИЧЕСКИЙ ЗАЛ</div>
+        <h2>Карта дня</h2>
+        <p>Задавайте вопросы без ограничений и выбирайте одну из трёх закрытых карт.</p>
+      </div>
+    </div>
+
+    ${readingArea}
+
+    <div class="panel tarot-upload-panel">
+      <div>
+        <h3>Добавить свою карту</h3>
+        <p>Все загруженные карты сразу появляются в общей галерее и доступны всем игрокам.</p>
+      </div>
+      <button class="btn secondary" onclick="openTarotUpload()">＋ Добавить карту</button>
+    </div>
+
+    <h3 class="subheading">Карты граждан</h3>
+    <div class="tarot-gallery">${gallery}</div>
+
+    <details class="panel tarot-standard-details">
+      <summary>Стандартная колода · ${standardCards.length} карт</summary>
+      <div class="tarot-standard-grid">
+        ${standardCards.map(card => tarotCardVisual(card, true)).join("")}
+      </div>
+    </details>
+
+    <h3 class="subheading">История предсказаний</h3>
+    <div class="tarot-history">${history}</div>
+
+    <div class="tarot-disclaimer">🔮 ${data.disclaimer}</div>
+  `);
+}
+
+window.offerTarotCards = async () => {
+  const input = $("tarotQuestionInput");
+  const question = (input?.value || "").trim();
+  if (question.length < 3) {
+    toast("Введите вопрос");
+    return;
+  }
+  try {
+    state.tarotQuestion = question;
+    state.tarotOffered = await api("/tarot/offer", {
+      method: "POST",
+      body: JSON.stringify({ question })
+    });
+    const back = state.data.media.tarot_back;
+    content.innerHTML = section("🔮 Выберите карту", `
+      <div class="tarot-pick-screen" ${bgStyle("tarot_bg")}>
+        <h2>${question}</h2>
+        <p>Выберите одну карту. После открытия изменить выбор нельзя.</p>
+        <div class="tarot-pick-grid">
+          ${state.tarotOffered.cards.map(card => `
+            <button class="tarot-back" onclick="chooseTarotCard(${card.position})"
+              ${back ? `style="background-image:url('${back}')"` : ""}>
+              <span>✦</span>
+            </button>`).join("")}
+        </div>
+      </div>`);
+  } catch (error) {
+    toast(error.message);
+  }
+};
+
+window.chooseTarotCard = async index => {
+  try {
+    const result = await api("/tarot/reading", {
+      method: "POST",
+      body: JSON.stringify({
+        question: state.tarotQuestion,
+        choice_index: index
+      })
+    });
+    toast("Карта открыта");
+    state.tarot = await api("/tarot");
+    state.tarotOffered = null;
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+};
+
+window.openTarotUpload = () => {
+  const modal = document.createElement("div");
+  modal.className = "tarot-upload-modal";
+  modal.id = "tarotUploadModal";
+  modal.innerHTML = `
+    <form class="tarot-upload-form" onsubmit="uploadTarotCard(event)">
+      <button type="button" class="viewer-close" onclick="closeTarotUpload()">✕</button>
+      <h2>Новая карта</h2>
+      <input name="name" maxlength="100" placeholder="Название карты" required>
+      <input name="suit" maxlength="64" placeholder="Масть или категория">
+      <textarea name="description" maxlength="2000" placeholder="Краткое описание"></textarea>
+      <textarea name="upright_meaning" maxlength="2000" placeholder="Значение в прямом положении" required></textarea>
+      <textarea name="reversed_meaning" maxlength="2000" placeholder="Значение в перевёрнутом положении" required></textarea>
+      <label class="tarot-file-label">Изображение карты
+        <input name="file" type="file" accept="image/*" required>
+      </label>
+      <button class="btn gold" type="submit">Добавить в общую галерею</button>
+    </form>`;
+  document.body.appendChild(modal);
+  document.body.classList.add("viewer-open");
+};
+
+window.closeTarotUpload = () => {
+  $("tarotUploadModal")?.remove();
+  document.body.classList.remove("viewer-open");
+};
+
+window.uploadTarotCard = async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  try {
+    const response = await fetch("/api/miniapp/tarot/cards", {
+      method: "POST",
+      headers: { "X-Telegram-Init-Data": initData },
+      body: data
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.detail || "Не удалось добавить карту");
+    closeTarotUpload();
+    toast("Карта добавлена и видна всем игрокам");
+    state.tarot = await api("/tarot");
+    render();
+  } catch (error) {
+    toast(error.message);
+  }
+};
+
+window.showTarotHistory = id => {
+  const item = state.tarot?.history.find(entry => entry.id === id);
+  if (!item) return;
+  openImageViewer(item.card.image_url || state.data.media.tarot_back);
+};
+
 function moreView() {
   return section("✨ Разделы", `
     <div class="quick-grid">
@@ -760,6 +1291,7 @@ function moreView() {
       ${quick("🗺", "Карта", "Земли Королевства", "map")}
       ${quick("🚩", "Фракции", "Политические силы", "factions")}
       ${quick("🎲", "Игры", "Арена и экспедиции", "games")}
+      ${quick("🔮", "Таро", "Предсказание и карты друзей", "tarot", "icon_tarot")}
     </div>`);
 }
 
@@ -776,6 +1308,8 @@ function render() {
     factions: factionsView,
     games: gamesView,
     customization: customizationView,
+    tarot: tarotView,
+    npcs: npcsView,
     more: moreView
   };
 
@@ -803,6 +1337,8 @@ window.showStreakInfo = showStreakInfo;
 window.go = view => {
   state.view = view;
   if(view==='games') loadDuelCenter(true);
+  if(view==='house') loadEstate(true);
+  if(view==='npcs') loadNpcs(true);
   render();
   tg?.HapticFeedback?.selectionChanged?.();
 };
@@ -922,6 +1458,13 @@ $("imageViewer")?.addEventListener("click", event => {
     if (!initData) throw new Error("Откройте Mini App внутри Telegram");
 
     await refresh();
+
+    const startParam = tg?.initDataUnsafe?.start_param || "";
+    if (startParam.startsWith("attack_")) {
+      state.view = "house";
+      await loadEstate(true);
+      render();
+    }
 
     setTimeout(() => {
       $("loading").classList.add("hidden");
