@@ -1800,3 +1800,81 @@ body.viewer-open {
   display: block;
   font-size: 12px;
 }
+
+
+/* v7.6.2 fixed — reliable NPC appearance cards */
+
+.studio-counter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 9px 0 13px;
+}
+
+.studio-counter span {
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  background: rgba(255,255,255,.045);
+  font-size: 11px;
+}
+
+.npc-appearance-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.npc-appearance-badge {
+  position: absolute;
+  z-index: 3;
+  top: 7px;
+  left: 7px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  color: #221308;
+  background: var(--gold);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.npc-appearance-item .theme-preview {
+  min-height: 176px;
+  background-color: #100919;
+  background-size: cover;
+  background-position: top center;
+}
+
+.npc-empty-preview {
+  display: block;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.npc-empty-preview::first-line {
+  font-size: 30px;
+}
+
+#themeGrid {
+  align-items: stretch;
+}
+
+#themeGrid .theme-item.hidden {
+  display: none !important;
+}
+
+@media (max-width: 390px) {
+  #themeGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .npc-appearance-item .theme-preview {
+    min-height: 155px;
+  }
+
+  .theme-actions {
+    grid-template-columns: 1fr;
+  }
+}

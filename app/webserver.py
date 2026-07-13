@@ -20,7 +20,13 @@ app.include_router(miniapp_router)
 
 @app.get("/miniapp")
 async def miniapp_index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/")
@@ -58,3 +64,11 @@ async def run_tasks(key: str = Query(default="")) -> dict[str, str]:
         return await process_due_game_tasks(bot)
     finally:
         await bot.session.close()
+
+
+@app.get("/version")
+async def version():
+    return {
+        "version": "7.6.2-fixed",
+        "npc_appearance_cards": 120,
+    }

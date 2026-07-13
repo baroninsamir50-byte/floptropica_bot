@@ -879,9 +879,14 @@ function customizationView() {
     const url = state.data.media[key];
     const npcAppearance = key.startsWith('npc_') && key !== 'npc_bg';
     return `<article class="theme-item ${npcAppearance ? 'npc-appearance-item' : 'base-theme-item'}">
+      ${npcAppearance ? '<span class="npc-appearance-badge">NPC</span>' : ''}
       <button class="theme-preview ${url ? '' : 'empty'}"
         ${url ? `style="background-image:url('${url}')" onclick="openImageViewer('${url}')"` : ''}>
-        ${url ? '<span>Нажмите для просмотра</span>' : '<span>Изображение не задано</span>'}
+        ${url
+          ? '<span>Нажмите для просмотра</span>'
+          : `<span class="${npcAppearance ? 'npc-empty-preview' : ''}">
+              ${npcAppearance ? '👤<br>Загрузить облик' : 'Изображение не задано'}
+            </span>`}
       </button>
       <b>${label}</b>
       <div class="theme-actions">
@@ -930,8 +935,18 @@ function customizationView() {
       </article>
     </div>
 
-    <h3 class="subheading">Оформление приложения</h3>
-    <div class="theme-grid">${themeCards}</div>
+    <div class="studio-tabs">
+      <button class="studio-tab active" onclick="filterStudio('all', this)">Все</button>
+      <button class="studio-tab" onclick="filterStudio('base', this)">Интерфейс</button>
+      <button class="studio-tab" onclick="filterStudio('npc', this)">Облики NPC</button>
+    </div>
+
+    <div class="studio-counter">
+      <span>Элементы интерфейса: <b>${document.createElement ? Object.keys(labels).filter(key => !(key.startsWith('npc_') && key !== 'npc_bg')).length : 0}</b></span>
+      <span>Карточки обликов NPC: <b>${Object.keys(labels).filter(key => key.startsWith('npc_') && key !== 'npc_bg').length}</b></span>
+    </div>
+
+    <div class="theme-grid" id="themeGrid">${themeCards}</div>
   `);
 }
 
@@ -957,15 +972,20 @@ window.uploadTheme = async (key,file) => {
 
 
 window.filterStudio = (mode, button) => {
-  document.querySelectorAll(".studio-tab").forEach(item => item.classList.remove("active"));
-  button?.classList.add("active");
-  document.querySelectorAll(".theme-item").forEach(item => {
-    const isNpc = item.classList.contains("npc-appearance-item");
-    item.classList.toggle(
-      "hidden",
-      (mode === "npc" && !isNpc) || (mode === "base" && isNpc)
-    );
+  document.querySelectorAll(".studio-tab").forEach(item => {
+    item.classList.remove("active");
   });
+  button?.classList.add("active");
+
+  document.querySelectorAll("#themeGrid .theme-item").forEach(item => {
+    const isNpc = item.classList.contains("npc-appearance-item");
+    const shouldHide =
+      (mode === "npc" && !isNpc) ||
+      (mode === "base" && isNpc);
+    item.classList.toggle("hidden", shouldHide);
+  });
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
 };
 
 window.previewTheme = key => {
