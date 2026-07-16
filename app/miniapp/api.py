@@ -7,7 +7,7 @@ from aiogram import Bot
 from aiogram.types import BufferedInputFile
 from io import BytesIO
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import SessionFactory
@@ -724,6 +724,13 @@ async def admin_theme_delete(
 class ProjectAdminRequest(BaseModel):
     telegram_id: int
     enabled: bool
+
+
+class PlayerTitleRequest(BaseModel):
+    character_id: int
+    title: str = Field(min_length=1, max_length=100)
+    social_status: str | None = Field(default=None, max_length=100)
+    faction: str | None = Field(default=None, max_length=100)
 
 
 @router.get("/admin/project-admins")
@@ -1491,3 +1498,111 @@ async def npc_action(
         npc.status = "dead"
         message += " NPC погиб от истощения."
     return {"ok": True, "message": message, "unit": await npc_payload(npc)}
+
+
+@router.post("/estate/repair")
+async def repair_estate(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    house = character.house
+    if not house:
+        raise HTTPException(404, "Владение не найдено.")
+    if house.integrity >= 100:
+        raise HTTPException(400, "Владение уже полностью восстановлено.")
+    cost = 15
+    if character.gold < cost:
+        raise HTTPException(400, "Для ремонта требуется 15 золота.")
+    await change_gold(session, character, -cost, "estate_repair")
+    restored = min(15, 100 - house.integrity)
+    house.integrity += restored
+    return {"ok": True, "cost": cost, "restored": restored, "integrity": house.integrity, "gold": character.gold}
+
+
+@router.get("/friends")
+async def friends_list(user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    me = await require_character(user, session)
+    result = await session.execute(
+        select(Character).where(Character.id != me.id).order_by(Character.level.desc(), Character.name)
+    )
+    players = []
+    for character in result.scalars():
+        players.append({
+            "id": character.id, "name": character.name, "level": character.level,
+            "title": character.title, "faction": character.faction,
+            "social_status": character.social_status, "reputation": character.reputation,
+            "portrait_available": bool(character.portrait_file_id),
+            "house": {
+                "name": character.house.name if character.house else None,
+                "location": character.house.location if character.house else None,
+                "description": character.house.description if character.house else None,
+                "level": character.house.level if character.house else None,
+                "integrity": character.house.integrity if character.house else None,
+                "image_available": bool(character.house and character.house.image_file_id),
+            },
+        })
+    return {"players": players}
+
+
+@router.get("/friends/{character_id}/portrait")
+async def friend_portrait(character_id: int, user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_character(user, session)
+    character = await session.get(Character, character_id)
+    if not character or not character.portrait_file_id:
+        raise HTTPException(404, "Портрет не найден.")
+    return await telegram_file_response(character.portrait_file_id)
+
+
+@router.get("/friends/{character_id}/house-image")
+async def friend_house_image(character_id: int, user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_character(user, session)
+    character = await session.get(Character, character_id)
+    if not character or not character.house or not character.house.image_file_id:
+        raise HTTPException(404, "Изображение владения не найдено.")
+    return await telegram_file_response(character.house.image_file_id)
+
+
+@router.get("/statistics")
+async def player_statistics(user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    character = await require_character(user, session)
+    tarot_count = await session.scalar(select(func.count(TarotReading.id)).where(TarotReading.character_id == character.id))
+    room_count = await session.scalar(select(func.count(HouseRoom.id)).where(HouseRoom.house_id == character.house.id)) if character.house else 0
+    npc_count = await session.scalar(select(func.count(NpcUnit.id)).where(NpcUnit.character_id == character.id, NpcUnit.alive.is_(True)))
+    attack_wins = await session.scalar(select(func.count(HouseAttack.id)).where(
+        HouseAttack.house_id == character.house.id,
+        HouseAttack.status.in_(["owner_won", "guards_won"]),
+    )) if character.house else 0
+    attacks_total = await session.scalar(select(func.count(HouseAttack.id)).where(HouseAttack.house_id == character.house.id)) if character.house else 0
+    return {
+        "duel_wins": character.duel_wins, "duel_losses": character.duel_losses,
+        "duel_rating": character.duel_rating, "win_streak": character.duel_win_streak,
+        "tarot_readings": int(tarot_count or 0), "rooms": int(room_count or 0),
+        "npcs": int(npc_count or 0), "house_defenses_won": int(attack_wins or 0),
+        "house_attacks": int(attacks_total or 0), "level": character.level,
+        "reputation": character.reputation, "gold": character.gold,
+    }
+
+
+@router.get("/admin/players")
+async def admin_players(user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_project_admin(session, user.id)
+    result = await session.execute(select(Character).order_by(Character.name))
+    return {"players": [{
+        "id": c.id, "name": c.name, "level": c.level, "title": c.title,
+        "social_status": c.social_status, "faction": c.faction,
+    } for c in result.scalars()]}
+
+
+@router.post("/admin/players/title")
+async def admin_set_player_title(payload: PlayerTitleRequest, user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_project_admin(session, user.id)
+    character = await session.get(Character, payload.character_id)
+    if not character:
+        raise HTTPException(404, "Игрок не найден.")
+    character.title = payload.title.strip()
+    if payload.social_status is not None:
+        character.social_status = payload.social_status.strip()
+    if payload.faction is not None:
+        character.faction = payload.faction.strip()
+    return {"ok": True, "id": character.id, "title": character.title, "social_status": character.social_status, "faction": character.faction}

@@ -136,7 +136,7 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
     else:
         gold_range, xp_range, bonus_stat = (1, 5), (5, 10), None
     multiplier = level_income_multiplier(character.level)
-    gold = max(1, int(randint(*gold_range) * multiplier))
+    gold = max(1, int(randint(*gold_range) * multiplier * 2.5))
     xp = randint(*xp_range) + character.level // 3
     await change_gold(session, character, gold, f"work_reward:{profession}")
     character.experience += xp
