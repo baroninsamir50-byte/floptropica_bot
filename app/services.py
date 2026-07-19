@@ -13,6 +13,29 @@ from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, 
 from app.work_catalog import profession_by_name, title_can_use
 
 
+GUARD_UPGRADE_ITEMS = (
+    "guard_upgrade_sword", "guard_upgrade_boots", "guard_upgrade_shield",
+    "guard_upgrade_helmet", "guard_upgrade_book",
+)
+FARMER_UPGRADE_ITEMS = (
+    "farmer_upgrade_sickle", "farmer_upgrade_boots", "farmer_upgrade_watering_can",
+    "farmer_upgrade_hat", "farmer_upgrade_book",
+)
+NPC_UPGRADE_ITEMS = GUARD_UPGRADE_ITEMS + FARMER_UPGRADE_ITEMS
+WORK_REWARD_MULTIPLIER = 1.5
+
+
+def guard_model_variant(level: int) -> int:
+    """Выбирает загруженный облик стражника по его уровню."""
+    if level >= 30:
+        return 3
+    if level >= 20:
+        return 2
+    return 1
+
+
+
+
 def local_date() -> str:
     return datetime.now(ZoneInfo(get_settings().timezone)).date().isoformat()
 
@@ -34,15 +57,34 @@ def apply_levels(character: Character) -> int:
 
 async def get_character(session: AsyncSession, telegram_id: int) -> Character | None:
     result = await session.execute(
-        select(Character).join(User).options(selectinload(Character.house)).where(User.telegram_id == telegram_id)
+        select(Character).join(User).options(selectinload(Character.house), selectinload(Character.user)).where(User.telegram_id == telegram_id)
     )
     return result.scalar_one_or_none()
 
 
+async def active_spouse(session: AsyncSession, character: Character) -> Character | None:
+    if not character.spouse_character_id:
+        return None
+    spouse = await session.get(Character, character.spouse_character_id)
+    if not spouse or spouse.spouse_character_id != character.id:
+        return None
+    return spouse
+
+
+async def household_members(session: AsyncSession, character: Character) -> list[Character]:
+    spouse = await active_spouse(session, character)
+    return [character, spouse] if spouse else [character]
+
+
 async def change_gold(session: AsyncSession, character: Character, amount: int, reason: str) -> None:
-    if character.gold + amount < 0:
+    spouse = await active_spouse(session, character)
+    balance = max(character.gold, spouse.gold) if spouse else character.gold
+    if balance + amount < 0:
         raise ValueError("Недостаточно золота.")
-    character.gold += amount
+    balance += amount
+    character.gold = balance
+    if spouse:
+        spouse.gold = balance
     session.add(GoldTransaction(character_id=character.id, amount=amount, reason=reason))
 
 
@@ -50,22 +92,32 @@ async def seed_items(session: AsyncSession) -> None:
     catalog = [
         ("development_points_30", "Свиток развития +30",
          "Даёт 30 свободных очков развития. Можно купить один раз в сутки.",
-         45, None, "Мифический", None, 0),
-        ("iron_sword", "Железный меч", "+2 к силе", 20, "weapon", "Обычный", "strength", 2),
-        ("knight_blade", "Клинок рыцаря", "+4 к силе", 45, "weapon", "Необычный", "strength", 4),
-        ("mage_staff", "Посох мага", "+5 к магии", 60, "weapon", "Редкий", "magic", 5),
-        ("leather_armor", "Кожаная броня", "+2 к выносливости", 24, "armor", "Обычный", "endurance", 2),
-        ("royal_armor", "Королевская броня", "+4 к выносливости", 50, "armor", "Необычный", "endurance", 4),
-        ("dragon_armor", "Броня драконьей чешуи", "+7 к выносливости", 95, "armor", "Эпический", "endurance", 7),
-        ("moon_amulet", "Лунный амулет", "+3 к магии", 35, "amulet", "Редкий", "magic", 3),
-        ("luck_amulet", "Амулет удачи", "+4 к удаче", 42, "amulet", "Редкий", "luck", 4),
-        ("heart_amulet", "Амулет живого сердца", "+15 к здоровью", 55, "amulet", "Эпический", "health", 15),
-        ("fox_pet", "Лис Флоппи", "+2 к удаче", 40, "pet", "Редкий", "luck", 2),
-        ("owl_pet", "Королевская сова", "+3 к интеллекту", 48, "pet", "Редкий", "intelligence", 3),
-        ("guardian_cat", "Кот-страж", "+3 к выносливости", 52, "pet", "Эпический", "endurance", 3),
-        ("healing_potion", "Зелье здоровья", "+10 к запасу здоровья", 8, None, "Обычный", "health", 10),
-        ("greater_healing_potion", "Большое зелье здоровья", "+25 к запасу здоровья", 18, None, "Необычный", "health", 25),
-        ("mana_crystal", "Кристалл маны", "+15 к запасу маны", 16, None, "Необычный", "mana", 15),
+         30, None, "Мифический", None, 0),
+        ("iron_sword", "Железный меч", "+2 к силе", 12, "weapon", "Обычный", "strength", 2),
+        ("knight_blade", "Клинок рыцаря", "+4 к силе", 26, "weapon", "Необычный", "strength", 4),
+        ("mage_staff", "Посох мага", "+5 к магии", 35, "weapon", "Редкий", "magic", 5),
+        ("leather_armor", "Кожаная броня", "+2 к выносливости", 14, "armor", "Обычный", "endurance", 2),
+        ("royal_armor", "Королевская броня", "+4 к выносливости", 30, "armor", "Необычный", "endurance", 4),
+        ("dragon_armor", "Броня драконьей чешуи", "+7 к выносливости", 55, "armor", "Эпический", "endurance", 7),
+        ("moon_amulet", "Лунный амулет", "+3 к магии", 20, "amulet", "Редкий", "magic", 3),
+        ("luck_amulet", "Амулет удачи", "+4 к удаче", 24, "amulet", "Редкий", "luck", 4),
+        ("heart_amulet", "Амулет живого сердца", "+15 к здоровью", 32, "amulet", "Эпический", "health", 15),
+        ("fox_pet", "Лис Флоппи", "+2 к удаче", 25, "pet", "Редкий", "luck", 2),
+        ("owl_pet", "Королевская сова", "+3 к интеллекту", 28, "pet", "Редкий", "intelligence", 3),
+        ("guardian_cat", "Кот-страж", "+3 к выносливости", 32, "pet", "Эпический", "endurance", 3),
+        ("healing_potion", "Зелье здоровья", "+10 к запасу здоровья", 5, None, "Обычный", "health", 10),
+        ("greater_healing_potion", "Большое зелье здоровья", "+25 к запасу здоровья", 11, None, "Необычный", "health", 25),
+        ("mana_crystal", "Кристалл маны", "+15 к запасу маны", 10, None, "Необычный", "mana", 15),
+        ("guard_upgrade_sword", "Клинок стражи", "Часть полного комплекта улучшения стражника: меч.", 10, None, "Комплект NPC", None, 0),
+        ("guard_upgrade_boots", "Сапоги караула", "Часть полного комплекта улучшения стражника: сапоги.", 8, None, "Комплект NPC", None, 0),
+        ("guard_upgrade_shield", "Башенный щит", "Часть полного комплекта улучшения стражника: щит.", 11, None, "Комплект NPC", None, 0),
+        ("guard_upgrade_helmet", "Шлем дозорного", "Часть полного комплекта улучшения стражника: шлем.", 9, None, "Комплект NPC", None, 0),
+        ("guard_upgrade_book", "Устав стражи", "Часть полного комплекта улучшения стражника: книга тактики.", 8, None, "Комплект NPC", None, 0),
+        ("farmer_upgrade_sickle", "Серп урожая", "Часть полного комплекта улучшения фермера: серп.", 9, None, "Комплект NPC", None, 0),
+        ("farmer_upgrade_boots", "Сапоги земледельца", "Часть полного комплекта улучшения фермера: сапоги.", 8, None, "Комплект NPC", None, 0),
+        ("farmer_upgrade_watering_can", "Лейка долины", "Часть полного комплекта улучшения фермера: лейка.", 9, None, "Комплект NPC", None, 0),
+        ("farmer_upgrade_hat", "Соломенная шляпа", "Часть полного комплекта улучшения фермера: шляпа.", 7, None, "Комплект NPC", None, 0),
+        ("farmer_upgrade_book", "Книга агронома", "Часть полного комплекта улучшения фермера: книга знаний.", 10, None, "Комплект NPC", None, 0),
     ]
     result = await session.execute(select(ItemTemplate))
     existing = {x.slug: x for x in result.scalars().all()}
@@ -79,16 +131,18 @@ async def seed_items(session: AsyncSession) -> None:
     await session.commit()
 
 
-async def get_daily_shop_items(session: AsyncSession, count: int = 5) -> list[ItemTemplate]:
+async def get_daily_shop_items(session: AsyncSession, count: int = 6) -> list[ItemTemplate]:
     result = await session.execute(select(ItemTemplate).order_by(ItemTemplate.slug))
     items = list(result.scalars().all())
     special = next((x for x in items if x.slug == "development_points_30"), None)
-    regular = [x for x in items if x.slug != "development_points_30"]
-    seed = int.from_bytes(
-        hashlib.sha256(f"shop:{local_date()}".encode()).digest()[:8], "big"
-    )
-    selected = Random(seed).sample(regular, min(max(count - 1, 0), len(regular)))
-    return ([special] if special else []) + selected
+    material_items = [x for x in items if x.slug in NPC_UPGRADE_ITEMS]
+    regular = [x for x in items if x.slug != "development_points_30" and x.slug not in NPC_UPGRADE_ITEMS]
+    seed = int.from_bytes(hashlib.sha256(f"shop:{local_date()}".encode()).digest()[:8], "big")
+    rng = Random(seed)
+    daily_material = rng.choice(material_items) if material_items else None
+    regular_count = max(0, count - int(special is not None) - int(daily_material is not None))
+    selected = rng.sample(regular, min(regular_count, len(regular)))
+    return ([special] if special else []) + ([daily_material] if daily_material else []) + selected
 
 
 async def start_work(character: Character, profession: str | None = None) -> str:
@@ -136,7 +190,7 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
     else:
         gold_range, xp_range, bonus_stat = (1, 5), (5, 10), None
     multiplier = level_income_multiplier(character.level)
-    gold = max(1, int(randint(*gold_range) * multiplier * 2.5))
+    gold = max(1, int(randint(*gold_range) * multiplier * WORK_REWARD_MULTIPLIER))
     xp = randint(*xp_range) + character.level // 3
     await change_gold(session, character, gold, f"work_reward:{profession}")
     character.experience += xp
@@ -163,6 +217,12 @@ async def buy_item(session: AsyncSession, character: Character, item_id: int) ->
         character.development_points += 30
         character.development_pack_date = today
         return item
+
+    if item.slug in NPC_UPGRADE_ITEMS:
+        today = local_date()
+        if character.daily_npc_material_date == today:
+            raise ValueError("Сегодня предмет для улучшения NPC уже куплен.")
+        character.daily_npc_material_date = today
 
     await change_gold(session, character, -item.price, f"buy:{item.slug}")
     result = await session.execute(

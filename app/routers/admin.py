@@ -13,11 +13,13 @@ from app.keyboards import (
     admin_attack_players_keyboard,
     admin_extended_keyboard,
     admin_media_keyboard,
+    admin_marriage_keyboard,
     admin_players_keyboard,
     admin_roles_keyboard,
     house_attack_keyboard,
 )
 from app.models import Character, GameEvent, House, HouseAttack, User
+from app.factions import WESTERN_FACTION, NEUTRAL_DIALOGUE, NO_FACTION, VIEW_LABELS
 from app.services import (
     apply_levels,
     change_gold,
@@ -28,13 +30,18 @@ from app.states import AdminMediaUpload
 
 router = Router()
 
-ROLE_DATA = {
-    "citizen": ("Гражданин", None),
-    "leader_west": ("Лидер фракции «Западная сторона»", "Западная сторона"),
-    "leader_neutral": ("Лидер фракции «Нейтральный Диалог»", "Нейтральный Диалог"),
-    "king": ("Король", None),
-    "queen": ("Королева", None),
-    "princess": ("Королевна", None),
+TITLE_DATA = {
+    "king": "Король",
+    "queen": "Королева",
+    "horgi": "Хорги",
+    "sorcerer": "Чародей",
+    "residents": "Жители",
+}
+
+FACTION_ASSIGNMENTS = {
+    "west": WESTERN_FACTION,
+    "neutral": NEUTRAL_DIALOGUE,
+    "none": NO_FACTION,
 }
 
 MEDIA_NAMES = {
@@ -260,7 +267,7 @@ async def admin_players(callback: CallbackQuery, session: AsyncSession) -> None:
     if await deny_callback(callback):
         return
     result = await session.execute(
-        select(User.telegram_id, Character.name, Character.title)
+        select(User.telegram_id, Character.name, Character.title, User.current_view)
         .join(Character, Character.user_id == User.id)
         .order_by(Character.name)
     )
@@ -294,41 +301,127 @@ async def admin_player(
     await callback.message.edit_text(
         f"👤 <b>{character.name}</b>\n"
         f"Telegram ID: <code>{telegram_id}</code>\n"
-        f"Роль: {character.title}\n"
-        f"Фракция: {character.faction}\n\n"
-        "Выберите новую роль:",
+        f"Титул: {character.title}\n"
+        f"Фракция: {character.faction}\n"
+        f"Статус: {character.social_status}\n"
+        f"Сейчас в игре: {VIEW_LABELS.get(character.user.current_view, character.user.current_view or 'Вне Mini App')}\n"
+        f"Последняя активность: {character.user.last_seen_at.strftime('%d.%m %H:%M') if character.user.last_seen_at else 'не зафиксирована'}\n\n"
+        "Назначьте титул или фракцию:",
         reply_markup=admin_roles_keyboard(telegram_id),
     )
 
 
-@router.callback_query(F.data.startswith("setrole:"))
-async def set_role(callback: CallbackQuery, session: AsyncSession) -> None:
+@router.callback_query(F.data.startswith("settitle:"))
+async def set_title(callback: CallbackQuery, session: AsyncSession) -> None:
     if await deny_callback(callback):
         return
-    _, telegram_id_raw, role_key = callback.data.split(":", 2)
-    role = ROLE_DATA.get(role_key)
-    if not role:
-        await callback.answer("Неизвестная роль.", show_alert=True)
+    _, telegram_id_raw, title_key = callback.data.split(":", 2)
+    title = TITLE_DATA.get(title_key)
+    if not title:
+        await callback.answer("Неизвестный титул.", show_alert=True)
         return
+    character = await get_character(session, int(telegram_id_raw))
+    if not character:
+        await callback.answer("Игрок не найден.", show_alert=True)
+        return
+    character.title = title
+    await callback.answer("Титул назначен.", show_alert=True)
+    await callback.message.edit_text(
+        f"✅ <b>{character.name}</b>\nТитул: <b>{character.title}</b>\nФракция: {character.faction}",
+        reply_markup=admin_roles_keyboard(int(telegram_id_raw)),
+    )
 
-    telegram_id = int(telegram_id_raw)
+
+@router.callback_query(F.data.startswith("setfaction:"))
+async def set_faction(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_callback(callback):
+        return
+    _, telegram_id_raw, faction_key = callback.data.split(":", 2)
+    faction = FACTION_ASSIGNMENTS.get(faction_key)
+    if not faction:
+        await callback.answer("Неизвестная фракция.", show_alert=True)
+        return
+    character = await get_character(session, int(telegram_id_raw))
+    if not character:
+        await callback.answer("Игрок не найден.", show_alert=True)
+        return
+    character.faction = faction
+    await callback.answer("Фракция назначена.", show_alert=True)
+    await callback.message.edit_text(
+        f"✅ <b>{character.name}</b>\nТитул: {character.title}\nФракция: <b>{character.faction}</b>",
+        reply_markup=admin_roles_keyboard(int(telegram_id_raw)),
+    )
+
+
+@router.callback_query(F.data.startswith("marriagepick:"))
+async def marriage_pick(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_callback(callback):
+        return
+    target_tid = int(callback.data.split(":", 1)[1])
+    result = await session.execute(
+        select(User.telegram_id, Character.name)
+        .join(Character, Character.user_id == User.id)
+        .order_by(Character.name)
+    )
+    await callback.answer()
+    await callback.message.edit_text(
+        "💍 <b>Выберите второго игрока</b>\n\nПосле назначения бюджет, комнаты и NPC станут общими.",
+        reply_markup=admin_marriage_keyboard(target_tid, list(result.all())),
+    )
+
+
+@router.callback_query(F.data.startswith("setmarriage:"))
+async def set_marriage(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_callback(callback):
+        return
+    _, first_tid_raw, second_tid_raw = callback.data.split(":", 2)
+    first = await get_character(session, int(first_tid_raw))
+    second = await get_character(session, int(second_tid_raw))
+    if not first or not second:
+        await callback.answer("Игрок не найден.", show_alert=True)
+        return
+    if first.id == second.id:
+        await callback.answer("Нельзя назначить брак с самим собой.", show_alert=True)
+        return
+    if first.spouse_character_id and first.spouse_character_id != second.id:
+        await callback.answer("Первый игрок уже состоит в браке.", show_alert=True)
+        return
+    if second.spouse_character_id and second.spouse_character_id != first.id:
+        await callback.answer("Второй игрок уже состоит в браке.", show_alert=True)
+        return
+    shared_gold = first.gold + second.gold if first.spouse_character_id != second.id else max(first.gold, second.gold)
+    first.gold = second.gold = shared_gold
+    first.spouse_character_id = second.id
+    second.spouse_character_id = first.id
+    first.social_status = second.social_status = "В браке"
+    await callback.answer("Совместный дом создан.", show_alert=True)
+    await callback.message.edit_text(
+        f"💍 <b>{first.name}</b> и <b>{second.name}</b> теперь в браке.\nОбщий бюджет: {shared_gold} 🪙",
+        reply_markup=admin_roles_keyboard(int(first_tid_raw)),
+    )
+
+
+@router.callback_query(F.data.startswith("clearmarriage:"))
+async def clear_marriage_callback(callback: CallbackQuery, session: AsyncSession) -> None:
+    if await deny_callback(callback):
+        return
+    telegram_id = int(callback.data.split(":", 1)[1])
     character = await get_character(session, telegram_id)
     if not character:
         await callback.answer("Игрок не найден.", show_alert=True)
         return
-
-    title, faction = role
-    character.title = title
-    if role_key == "citizen":
-        character.faction = "Нет"
-    elif faction:
-        character.faction = faction
-
-    await callback.answer("Роль назначена.", show_alert=True)
+    spouse = await session.get(Character, character.spouse_character_id) if character.spouse_character_id else None
+    if spouse and spouse.spouse_character_id == character.id:
+        balance = max(character.gold, spouse.gold)
+        character.gold = balance // 2 + balance % 2
+        spouse.gold = balance // 2
+        spouse.spouse_character_id = None
+        spouse.social_status = "Не в браке"
+    character.spouse_character_id = None
+    character.social_status = "Не в браке"
+    await callback.answer("Статус брака снят.", show_alert=True)
     await callback.message.edit_text(
-        f"✅ Игроку <b>{character.name}</b> назначена роль:\n"
-        f"<b>{title}</b>\n"
-        f"Фракция: {character.faction}",
+        f"💔 <b>{character.name}</b> больше не состоит в браке.",
         reply_markup=admin_roles_keyboard(telegram_id),
     )
 

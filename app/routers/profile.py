@@ -2,12 +2,14 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import get_settings
+from app.models import House
 from app.keyboards import development_keyboard, house_panel_keyboard, main_menu, treasury_keyboard
 from app.services import (
     get_character, get_equipment_bonuses, get_system_media, xp_for_next,
-    level_income_multiplier, level_rank,
+    level_income_multiplier, level_rank, household_members,
 )
 from app.states import ChangeHousePhoto, ChangePortrait
 router = Router()
@@ -46,9 +48,13 @@ async def profile_cb(callback:CallbackQuery,session:AsyncSession):
 
 async def send_house(target,session,tid):
     c=await get_character(session,tid)
-    if not c or not c.house: return await target.answer("Дом не найден. Используйте /start.")
-    h=c.house
-    caption=(f"🏰 <b>{h.name}</b>\n👤 Владелец: {c.name}\n📍 {h.location}\n📖 {h.description}\n"
+    if not c: return await target.answer("Дом не найден. Используйте /start.")
+    members=await household_members(session,c)
+    primary=min(members,key=lambda member: member.id)
+    h=await session.scalar(select(House).where(House.owner_id==primary.id))
+    if not h: return await target.answer("Дом не найден. Используйте /start.")
+    owners=" и ".join(member.name for member in members)
+    caption=(f"🏰 <b>{h.name}</b>\n👤 Владельцы: {owners}\n📍 {h.location}\n📖 {h.description}\n"
              f"⭐ Уровень: {h.level}\n💰 Стоимость: {h.value}\n🛡 Защита: {h.defense}\n"
              f"🏗 Прочность: {h.integrity}/100\n✨ Энергия ремонта: {h.repair_energy}")
     await target.answer_photo(h.image_file_id,caption=caption,reply_markup=house_panel_keyboard())
@@ -75,8 +81,15 @@ async def change_house(message:Message,state:FSMContext,session:AsyncSession):
     await state.set_state(ChangeHousePhoto.photo); await message.answer("Пришлите новую фотографию дома.")
 @router.message(ChangeHousePhoto.photo,F.photo)
 async def save_house(message:Message,state:FSMContext,session:AsyncSession):
-    c=await get_character(session,message.from_user.id); c.house.image_file_id=message.photo[-1].file_id
-    await state.clear(); await message.answer("✅ Фото дома обновлено.")
+    c=await get_character(session,message.from_user.id)
+    members=await household_members(session,c)
+    primary=min(members,key=lambda member: member.id)
+    house=await session.scalar(select(House).where(House.owner_id==primary.id))
+    if not house:
+        await state.clear(); return await message.answer("Дом не найден.")
+    house.image_file_id=message.photo[-1].file_id
+    await state.clear(); await message.answer("✅ Фото совместного дома обновлено.")
+
 
 @router.message(Command("menu","меню"))
 async def menu(message:Message):

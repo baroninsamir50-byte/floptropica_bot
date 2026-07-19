@@ -63,10 +63,14 @@ async def create_daily_attacks(bot: Bot):
             )
         )
         for house, character, user in result.all():
+            spouse = await session.get(Character, character.spouse_character_id) if character.spouse_character_id else None
+            if spouse and spouse.spouse_character_id == character.id and character.id > spouse.id:
+                continue
+            household_level = max(character.level, spouse.level) if spouse else character.level
             enemy_name, enemy_type, base_power = choice(ENEMIES)
             power = (
                 base_power
-                + character.level * 2
+                + household_level * 2
                 + house.threat_level * 5
                 + randint(-3, 7)
             )
@@ -86,6 +90,14 @@ async def create_daily_attacks(bot: Bot):
                 f"@{user.username}" if user.username
                 else f'<a href="tg://user?id={user.telegram_id}">{character.name}</a>'
             )
+            if spouse:
+                spouse_user = await session.get(User, spouse.user_id)
+                spouse_mention = (
+                    f"@{spouse_user.username}" if spouse_user and spouse_user.username
+                    else f'<a href="tg://user?id={spouse_user.telegram_id}">{spouse.name}</a>' if spouse_user
+                    else spouse.name
+                )
+                mention = f"{mention} и {spouse_mention}"
             await send_group(
                 bot,
                 f"⚠ <b>НАПАДЕНИЕ НА ВЛАДЕНИЕ!</b>\n\n"
@@ -114,9 +126,11 @@ async def resolve_expired_waiting(bot: Bot):
             )
         )
         for attack, house, owner in result.all():
+            spouse = await session.get(Character, owner.spouse_character_id) if owner.spouse_character_id else None
+            household_ids = [owner.id] + ([spouse.id] if spouse and spouse.spouse_character_id == owner.id else [])
             guard_result = await session.execute(
                 select(NpcUnit).where(
-                    NpcUnit.character_id == owner.id,
+                    NpcUnit.character_id.in_(household_ids),
                     NpcUnit.npc_type == "guard",
                     NpcUnit.alive.is_(True),
                     NpcUnit.status == "idle",
@@ -172,9 +186,11 @@ async def resolve_guard_battles(bot: Bot):
             )
         )
         for attack, house, owner in result.all():
+            spouse = await session.get(Character, owner.spouse_character_id) if owner.spouse_character_id else None
+            household_ids = [owner.id] + ([spouse.id] if spouse and spouse.spouse_character_id == owner.id else [])
             guard_result = await session.execute(
                 select(NpcUnit).where(
-                    NpcUnit.character_id == owner.id,
+                    NpcUnit.character_id.in_(household_ids),
                     NpcUnit.npc_type == "guard",
                     NpcUnit.assignment == f"attack:{attack.id}",
                     NpcUnit.alive.is_(True),

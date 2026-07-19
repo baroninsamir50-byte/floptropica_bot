@@ -2,7 +2,7 @@ from app.work_catalog import available_professions, profession_by_key
 
 def test_faction_chair_restricted():
     citizen = {key for key, _ in available_professions("Гражданин")}
-    leader = {key for key, _ in available_professions("Лидер фракции «Западная сторона»")}
+    leader = {key for key, _ in available_professions("Хорги")}
     assert "faction_chair" not in citizen
     assert "faction_chair" in leader
 

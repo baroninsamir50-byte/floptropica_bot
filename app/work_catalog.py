@@ -35,7 +35,7 @@ WORK_PROFESSIONS: dict[str, dict[str, object]] = {
         "gold": (5, 9),
         "xp": (12, 18),
         "bonus_stat": "charisma",
-        "required_titles": {"Король", "Королева", "Королевна"},
+        "required_titles": {"Король", "Королева"},
     },
     "faction_chair": {
         "name": "Председатель фракции",
@@ -43,10 +43,7 @@ WORK_PROFESSIONS: dict[str, dict[str, object]] = {
         "gold": (4, 8),
         "xp": (10, 16),
         "bonus_stat": "charisma",
-        "required_titles": {
-            "Лидер фракции «Западная сторона»",
-            "Лидер фракции «Нейтральный Диалог»",
-        },
+        "required_titles": {"Король", "Королева", "Хорги", "Чародей"},
     },
     "royal_designer": {
         "name": "Королевский художник-дизайнер",

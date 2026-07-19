@@ -16,6 +16,12 @@ const state = {
   tarotOffered: null,
   estate: null,
   npcs: null,
+  friends: null,
+  friendsLoading: false,
+  friendsError: null,
+  selectedFriend: null,
+  statistics: null,
+  adminPlayers: null,
   projectAdmins: null,
   duels: null,
   duelStyle: "guardian",
@@ -390,6 +396,7 @@ function houseView() {
       </div>
     </div>
 
+    ${estate.household?.shared ? `<div class="panel shared-household-banner">💍 Совместный дом с <b>${estate.household.spouse_name}</b>. Комнаты, NPC и бюджет объединены.</div>` : ""}
     ${estate.attack ? monsterBattle(estate.attack) : ""}
 
     <div class="panel estate-status">
@@ -399,7 +406,7 @@ function houseView() {
       <div class="estate-actions-grid">
         <button class="btn gold" onclick="repairEstate()" ${h.integrity >= 100 ? "disabled" : ""}>🔨 Ремонт · 15 🪙</button>
         <button class="btn secondary" onclick="cleanEstate('self')" ${estate.house.cleaning_available ? "" : "disabled"}>🧹 Убраться</button>
-        <button class="btn secondary" onclick="cleanEstate('peasant')" ${estate.house.cleaning_available ? "" : "disabled"}>🌾 Крестьянин</button>
+        <button class="btn secondary" onclick="cleanEstate('peasant')" ${estate.house.cleaning_available ? "" : "disabled"}>🌾 Фермер</button>
         <button class="btn secondary" onclick="go('npcs')">👥 NPC</button>
       </div>
     </div>
@@ -481,24 +488,27 @@ window.uploadRoom=async event=>{
 function developmentView() {
   const h = state.data.hero;
 
+  const favored = new Set(h.faction_bonus?.favored_stats || []);
   const cards = Object.entries(h.stats).map(([key, value]) => `
-    <div class="card">
+    <div class="card ${favored.has(key) ? "faction-favored-stat" : ""}">
       <div class="row">
         <b>${statLabels[key]}</b>
         <span class="badge">${value}</span>
       </div>
+      ${favored.has(key) ? '<small class="faction-bonus-label">Бонус фракции</small>' : ''}
       <div class="action-grid">
         <button class="btn secondary" onclick="develop('${key}',1)"
           ${h.development_points < 1 ? "disabled" : ""}>+1</button>
         <button class="btn gold" onclick="develop('${key}',5)"
-          ${h.development_points < 5 ? "disabled" : ""}>+5</button>
+          ${h.development_points < 5 ? "disabled" : ""}>${favored.has(key) ? "+6 за 5" : "+5"}</button>
       </div>
     </div>`).join("");
 
   return section(`🏋 Развитие · осталось ${h.development_points}`, `
-    <div class="panel muted media-panel" ${bgStyle("development")}>
-      Каждое очко навсегда усиливает героя и влияет на дуэли,
-      экспедиции и защиту дома.
+    <div class="panel faction-development-panel" ${bgStyle("development")}>
+      <div class="eyebrow">${h.faction_bonus?.icon || '🚩'} ${h.faction_bonus?.name || h.faction}</div>
+      <h3>${h.faction_bonus?.description || 'Фракцию назначает создатель.'}</h3>
+      <p>${h.faction_bonus?.bonus_text || ''}</p>
     </div>
     <div class="cards">${cards}</div>`);
 }
@@ -557,7 +567,7 @@ function shopView() {
       <div class="visual-overlay">
         <div class="eyebrow">МАГАЗИН ДНЯ</div>
         <h3>Магический ассортимент</h3>
-        <p>Свиток +30 очков развития доступен ежедневно.</p>
+        <p>Цены снижены. Каждый день дополнительно появляется один предмет для комплекта улучшения стражника или фермера.</p>
       </div>
     </div>
     <div class="cards shop-list">${items}</div>`);
@@ -604,12 +614,12 @@ function factionsView() {
   return section("🚩 Фракции", `
     <div class="cards">
       <div class="card">
-        <h3>🌅 Западная сторона</h3>
-        <p>Порядок, сила и контроль территорий.</p>
+        <h3>🌅 ЗАПАДНАЯ ФРАКЦИЯ</h3>
+        <p>Бонус развития: сила, выносливость и ловкость получают +6 при вложении 5 очков.</p>
       </div>
       <div class="card">
-        <h3>🕊 Нейтральный Диалог</h3>
-        <p>Дипломатия, баланс и переговоры.</p>
+        <h3>🕊 НЕЙТРАЛЬНЫЙ ДИАЛОГ</h3>
+        <p>Бонус развития: интеллект, харизма и магия получают +6 при вложении 5 очков.</p>
       </div>
       <div class="panel">
         <div class="row">
@@ -1043,6 +1053,7 @@ async function loadNpcs(silent=false){
 }
 function npcCard(npc){
   const dead=!npc.alive;
+  const materials=(npc.upgrade_materials||[]).map(item=>`<span class="npc-material ${item.owned?'owned':'missing'}">${item.owned?'✓':'○'} ${item.name}</span>`).join('');
   return `<article class="npc-card ${dead?'dead':''}">
     <div class="npc-model">
       <img src="${npc.model_url}" alt="${npc.name}" onerror="this.style.display='none'">
@@ -1050,9 +1061,17 @@ function npcCard(npc){
     </div>
     <div class="npc-copy">
       <div class="row"><h3>${npc.name}</h3><span class="badge">Ур. ${npc.level}</span></div>
+      ${npc.owner_name ? `<small>Владелец: ${npc.owner_name}</small>` : ''}
       <div class="stat-head"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
       <div class="bar fatigue"><i style="width:${npc.fatigue}%"></i></div>
       <small>${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
+      ${!dead ? `<div class="npc-upgrade-box">
+        <b>Улучшение №${npc.upgrade_count+1} · ${npc.upgrade_cost} 🪙</b>
+        ${npc.appearance_rule?`<small class="muted">${npc.appearance_rule}</small>`:''}
+        <div class="npc-material-list">${materials}</div>
+        <small class="muted">После улучшения комплект из 5 предметов будет использован.</small>
+        <button class="btn gold" onclick="upgradeNpc(${npc.id})" ${npc.upgrade_ready?'':'disabled'}>⬆ Улучшить NPC</button>
+      </div>` : ''}
       ${!dead?npc.type==='guard'?`
         <div class="action-grid">
           <button class="btn secondary" onclick="npcAction(${npc.id},'school')">🏫 Школа</button>
@@ -1074,11 +1093,13 @@ function npcsView(){
   return section("👥 NPC",`
     <div class="section-visual-large" ${bgStyle("npc_bg")}><div class="visual-overlay">
       <div class="eyebrow">СЛУГИ И ЗАЩИТНИКИ</div><h3>Управление NPC</h3>
-      <p>Стражники защищают дом, крестьяне выполняют хозяйственные поручения.</p>
+      <p>Стражники защищают дом, фермеры выполняют хозяйственные поручения.</p>
     </div></div>
+    ${d.shared_with ? `<div class="panel shared-household-banner">💍 Общие NPC с ${d.shared_with}</div>` : ''}
+    ${d.festival?.active ? `<div class="panel festival-card"><div><div class="eyebrow">ФЕСТИВАЛЬ ЛЕТА</div><h3>Бесплатный стражник</h3><p>Награду можно забрать до ${d.festival.ends_at} включительно.</p></div><button class="btn gold" onclick="claimSummerGuard()" ${d.festival.can_claim?'':'disabled'}>${d.festival.claimed?'Получено':'Забрать'}</button></div>` : ''}
     <div class="npc-shop action-grid">
       <button class="btn gold" onclick="buyNpc('guard')">🛡 Стражник · ${d.prices.guard} 🪙</button>
-      <button class="btn gold" onclick="buyNpc('peasant')">🌾 Крестьянин · ${d.prices.peasant} 🪙</button>
+      <button class="btn gold" onclick="buyNpc('peasant')">🌾 Фермер · ${d.prices.peasant} 🪙</button>
     </div>
     <div class="panel npc-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p><p>${d.rules.school}</p></div>
     <div class="npc-list">${d.units.map(npcCard).join("")||'<div class="panel muted">У вас пока нет NPC.</div>'}</div>
@@ -1086,6 +1107,8 @@ function npcsView(){
 }
 window.buyNpc=async npc_type=>{try{await api("/npcs/buy",{method:"POST",body:JSON.stringify({npc_type})});toast("NPC приобретён");await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
 window.npcAction=async(npc_id,action)=>{try{const r=await api("/npcs/action",{method:"POST",body:JSON.stringify({npc_id,action})});toast(r.message);await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
+window.upgradeNpc=async npc_id=>{try{const r=await api("/npcs/upgrade",{method:"POST",body:JSON.stringify({npc_id})});toast(r.message);await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
+window.claimSummerGuard=async()=>{try{const r=await api("/festival/summer-guard",{method:"POST"});toast(r.message);await loadNpcs(true);render()}catch(error){toast(error.message)}};
 
 function gamesView() {
   const d=state.duels;
@@ -1314,16 +1337,220 @@ window.showTarotHistory = id => {
   openImageViewer(item.card.image_url || state.data.media.tarot_back);
 };
 
-async function loadFriends(silent=false){try{state.friends=await api("/friends");if(!silent)render()}catch(error){toast(error.message)}}
-function friendCard(p){return `<article class="friend-card"><div class="friend-avatar">${p.portrait_available?`<img class="image-loading" data-protected-image="/friends/${p.id}/portrait" alt="${p.name}">`:`<span>👤</span>`}</div><div class="friend-copy"><div class="row"><h3>${p.name}</h3><span class="badge">Ур. ${p.level}</span></div><p>${p.title}</p><small>${p.faction} · ${p.social_status}</small><button class="btn secondary" onclick="openFriend(${p.id})">Подробнее</button></div></article>`}
-function friendsView(){if(!state.friends){setTimeout(()=>loadFriends(),0);return section("👥 Друзья",`<div class="panel">Загружаем жителей…</div>`)}return section("👥 Друзья",`<div class="friends-list">${state.friends.players.map(friendCard).join("")||'<div class="panel muted">Другие игроки ещё не зарегистрированы.</div>'}</div>`)}
-window.openFriend=id=>{state.selectedFriend=state.friends?.players.find(p=>p.id===id);if(!state.selectedFriend)return;state.view="friend-detail";render()}
-function friendDetailView(){const p=state.selectedFriend;if(!p)return friendsView();const h=p.house;return section(`👤 ${p.name}`,`<div class="friend-profile-hero"><div class="friend-profile-portrait">${p.portrait_available?`<img class="image-loading" data-protected-image="/friends/${p.id}/portrait" alt="${p.name}">`:`<span>👤</span>`}</div><div class="panel"><h2>${p.name}</h2><p><span class="badge">${p.title}</span> <span class="badge">Ур. ${p.level}</span></p><div class="row"><span>Фракция</span><b>${p.faction}</b></div><div class="row"><span>Статус</span><b>${p.social_status}</b></div><div class="row"><span>Репутация</span><b>${p.reputation}</b></div></div></div><h3 class="subheading">Владение</h3><div class="friend-house-banner">${h?.image_available?`<img class="image-loading" data-protected-image="/friends/${p.id}/house-image" alt="${h.name}">`:`<div class="upload-placeholder"><span class="upload-symbol">🏰</span><p>Фото владения не загружено</p></div>`}<div class="house-photo-caption"><h2>${h?.name||"Владение не создано"}</h2><p>${h?.location||""}</p></div></div>${h?`<div class="panel"><div class="row"><span>Уровень</span><b>${h.level}</b></div><div class="row"><span>Прочность</span><b>${h.integrity}/100</b></div><p>${h.description||""}</p></div>`:""}<button class="btn secondary" onclick="go('friends')">← Вернуться к друзьям</button>`)}
-async function loadStatistics(silent=false){try{state.statistics=await api("/statistics");if(!silent)render()}catch(error){toast(error.message)}}
-function statisticsView(){if(!state.statistics){setTimeout(()=>loadStatistics(),0);return section("📊 Статистика",`<div class="panel">Подсчитываем результаты…</div>`)}const s=state.statistics;const items=[["⚔","Победы в дуэлях",s.duel_wins],["💀","Поражения",s.duel_losses],["🏆","Рейтинг дуэлей",s.duel_rating],["🔥","Серия побед",s.win_streak],["🛡","Успешные защиты",s.house_defenses_won],["👹","Нападения на дом",s.house_attacks],["🔮","Расклады Таро",s.tarot_readings],["🚪","Комнаты",s.rooms],["👥","Живые NPC",s.npcs],["⭐","Репутация",s.reputation]];return section("📊 Статистика",`<div class="statistics-grid">${items.map(([i,l,v])=>`<div class="statistic-card"><span>${i}</span><b>${v}</b><small>${l}</small></div>`).join("")}</div>`)}
-async function loadAdminPlayers(silent=false){if(!state.data?.is_admin)return;try{state.adminPlayers=await api("/admin/players");if(!silent)render()}catch(error){toast(error.message)}}
-function adminPlayerManager(){if(!state.data?.is_admin)return"";if(!state.adminPlayers){setTimeout(()=>loadAdminPlayers(),0);return`<div class="panel">Загружаем игроков…</div>`}return`<div class="panel admin-player-manager"><div class="eyebrow">УПРАВЛЕНИЕ ИГРОКАМИ</div><h3>Титулы, статусы и фракции</h3><div class="admin-player-list">${state.adminPlayers.players.map(p=>`<article><b>${p.name} · ур. ${p.level}</b><input id="title-${p.id}" value="${p.title||""}" placeholder="Титул"><input id="status-${p.id}" value="${p.social_status||""}" placeholder="Социальный статус"><input id="faction-${p.id}" value="${p.faction||""}" placeholder="Фракция"><button class="btn gold" onclick="savePlayerTitle(${p.id})">Сохранить</button></article>`).join("")}</div></div>`}
-window.savePlayerTitle=async id=>{try{await api("/admin/players/title",{method:"POST",body:JSON.stringify({character_id:id,title:$(`title-${id}`).value,social_status:$(`status-${id}`).value,faction:$(`faction-${id}`).value})});toast("Данные игрока обновлены");await loadAdminPlayers(true);render()}catch(error){toast(error.message)}};
+async function loadFriends() {
+  if (state.friendsLoading) return;
+  state.friendsLoading = true;
+  state.friendsError = null;
+  try {
+    state.friends = await api("/friends");
+  } catch (error) {
+    state.friendsError = error.message;
+  } finally {
+    state.friendsLoading = false;
+    if (state.view === "friends") render();
+  }
+}
+
+function friendCard(player) {
+  return `<article class="friend-card">
+    <div class="friend-avatar">
+      ${player.portrait_available
+        ? `<img class="image-loading" data-protected-image="/friends/${player.id}/portrait" alt="${player.name}">`
+        : `<span>👤</span>`}
+    </div>
+    <div class="friend-copy">
+      <div class="row">
+        <h3>${player.name}</h3>
+        <span class="badge">Ур. ${player.level}</span>
+      </div>
+      <p>${player.title}${player.is_me ? ' · Это вы' : ''}</p>
+      <small>${player.faction}</small>
+      <button class="btn secondary" onclick="openFriend(${player.id})">Подробнее</button>
+    </div>
+  </article>`;
+}
+
+function friendsView() {
+  if (state.friendsError) {
+    return section("👥 Друзья", `<div class="panel error-panel">
+      <h3>Не удалось загрузить игроков</h3>
+      <p>${state.friendsError}</p>
+      <button class="btn gold" onclick="retryFriends()">Повторить</button>
+    </div>`);
+  }
+  if (!state.friends) {
+    if (!state.friendsLoading) setTimeout(loadFriends, 0);
+    return section("👥 Друзья", `<div class="panel">Загружаем всех зарегистрированных игроков…</div>`);
+  }
+  return section("👥 Друзья", `
+    <div class="friends-summary">Зарегистрировано: <b>${state.friends.players.length}</b></div>
+    <div class="friends-list">
+      ${state.friends.players.map(friendCard).join("") || '<div class="panel muted">Игроки ещё не зарегистрированы.</div>'}
+    </div>`);
+}
+
+window.retryFriends = () => {
+  state.friends = null;
+  state.friendsError = null;
+  loadFriends();
+  render();
+};
+
+window.openFriend = id => {
+  state.selectedFriend = state.friends?.players.find(player => player.id === id);
+  if (!state.selectedFriend) return;
+  state.view = "friend-detail";
+  reportPresence("friend-detail");
+  render();
+};
+
+function friendDetailView() {
+  const player = state.selectedFriend;
+  if (!player) {
+    state.view = "friends";
+    return friendsView();
+  }
+  const house = player.house;
+  const rooms=(house?.rooms||[]).map(room=>`<article class="friend-room-card">
+    <div class="friend-room-image">${room.image_available?`<img class="image-loading" data-protected-image="/friends/${player.id}/rooms/${room.id}/image" alt="${room.name}">`:'🚪'}</div>
+    <div><b>${room.name}</b><small>${room.description||'Комната владения'}</small></div>
+  </article>`).join('');
+  return section(`👤 ${player.name}`, `
+    <div class="friend-profile-hero">
+      <div class="friend-profile-portrait">
+        ${player.portrait_available
+          ? `<img class="image-loading" data-protected-image="/friends/${player.id}/portrait" alt="${player.name}">`
+          : `<span>👤</span>`}
+      </div>
+      <div class="panel">
+        <h2>${player.name}</h2>
+        <p><span class="badge">${player.title}</span> <span class="badge">Ур. ${player.level}</span></p>
+        <div class="row"><span>Фракция</span><b>${player.faction}</b></div>
+        <div class="row"><span>Репутация</span><b>${player.reputation}</b></div>
+        ${player.spouse?`<div class="row"><span>💍 В браке</span><b>${player.spouse.name}</b></div>`:''}
+      </div>
+    </div>
+    <h3 class="subheading">🏰 В гостях</h3>
+    <div class="friend-house-banner">
+      ${house?.image_available
+        ? `<img class="image-loading" data-protected-image="/friends/${player.id}/house-image" alt="${house.name}">`
+        : `<div class="upload-placeholder"><span class="upload-symbol">🏰</span><p>Фото владения не загружено</p></div>`}
+      <div class="house-photo-caption"><h2>${house?.name || "Владение не создано"}</h2><p>${house?.location || ""}</p></div>
+    </div>
+    ${house ? `<div class="panel">
+      <div class="row"><span>Уровень дома</span><b>${house.level}</b></div>
+      <div class="row"><span>Прочность</span><b>${house.integrity}/100</b></div>
+      <div class="row"><span>Чистота</span><b>${house.cleanliness}/100</b></div>
+      <p>${house.description || ""}</p>
+      ${!player.is_me ? `<button class="btn gold" onclick="repairFriendHouse(${player.id})" ${house.integrity>=100?'disabled':''}>🤝 Помочь с ремонтом · 12 🪙</button>` : ''}
+    </div>
+    <h3 class="subheading">🚪 Комнаты</h3><div class="friend-room-list">${rooms||'<div class="panel muted">Комнат пока нет.</div>'}</div>` : ""}
+    <button class="btn secondary" onclick="go('friends')">← Вернуться к игрокам</button>`);
+}
+
+window.repairFriendHouse=async id=>{
+  try{
+    const r=await api(`/friends/${id}/repair`,{method:'POST'});
+    toast(r.message);
+    state.friends=await api('/friends');
+    state.selectedFriend=state.friends.players.find(player=>player.id===id);
+    await refresh();
+    state.view='friend-detail';
+    render();
+  }catch(error){toast(error.message)}
+};
+
+async function loadStatistics() {
+  try {
+    state.statistics = await api("/statistics");
+    if (state.view === "statistics") render();
+  } catch (error) { toast(error.message); }
+}
+
+function statisticsView() {
+  if (!state.statistics) {
+    setTimeout(loadStatistics, 0);
+    return section("📊 Статистика", `<div class="panel">Подсчитываем результаты…</div>`);
+  }
+  const s = state.statistics;
+  const items = [["⚔","Победы в дуэлях",s.duel_wins],["💀","Поражения",s.duel_losses],["🏆","Рейтинг дуэлей",s.duel_rating],["🔥","Серия побед",s.win_streak],["🛡","Успешные защиты",s.house_defenses_won],["👹","Нападения на дом",s.house_attacks],["🔮","Расклады Таро",s.tarot_readings],["🚪","Комнаты",s.rooms],["👥","Живые NPC",s.npcs],["⭐","Репутация",s.reputation]];
+  return section("📊 Статистика", `<div class="statistics-grid">${items.map(([icon,label,value])=>`<div class="statistic-card"><span>${icon}</span><b>${value}</b><small>${label}</small></div>`).join("")}</div>`);
+}
+
+async function loadAdminPlayers() {
+  if (!state.data?.is_admin) return;
+  try {
+    state.adminPlayers = await api("/admin/players");
+    if (state.view === "customization") render();
+  } catch (error) { toast(error.message); }
+}
+
+function adminPlayerManager() {
+  if (!state.data?.is_admin) return "";
+  if (!state.adminPlayers) {
+    setTimeout(loadAdminPlayers, 0);
+    return `<div class="panel">Загружаем игроков…</div>`;
+  }
+  const titleOptions = title => state.adminPlayers.allowed_titles.map(item =>
+    `<option value="${item}" ${item === title ? "selected" : ""}>${item}</option>`
+  ).join("");
+  const spouseOptions = player => `<option value="">Не в браке</option>` + state.adminPlayers.players
+    .filter(item=>item.id!==player.id)
+    .map(item=>`<option value="${item.id}" ${item.id===player.spouse_character_id?'selected':''}>${item.name}</option>`).join('');
+  return `<div class="panel admin-player-manager">
+    <div class="eyebrow">УПРАВЛЕНИЕ ИГРОКАМИ</div>
+    <div class="row"><h3>Титулы, браки и активность</h3><button class="text-button" onclick="refreshAdminActivity()">Обновить</button></div>
+    <p class="muted">Фракция назначается через панель создателя в боте. Брак объединяет бюджет, комнаты и NPC.</p>
+    <div class="admin-player-list">
+      ${state.adminPlayers.players.map(player => `<article>
+        <div class="row"><b>${player.name} · ур. ${player.level}</b><span class="presence-badge ${player.activity.online ? 'online' : ''}">${player.activity.online ? 'В игре' : 'Не в сети'}</span></div>
+        <small>Сейчас: ${player.activity.view_label}</small>
+        <small>Фракция: ${player.faction}</small>
+        <label>Титул<select id="title-${player.id}">${titleOptions(player.title)}</select></label>
+        <button class="btn gold" onclick="savePlayerTitle(${player.id})">Назначить титул</button>
+        <label>Статус брака<select id="spouse-${player.id}">${spouseOptions(player)}</select></label>
+        <button class="btn secondary" onclick="savePlayerMarriage(${player.id})">Сохранить брак</button>
+      </article>`).join("")}
+    </div>
+  </div>`;
+}
+
+window.refreshAdminActivity = async () => {
+  state.adminPlayers = null;
+  render();
+  await loadAdminPlayers();
+};
+
+window.savePlayerTitle = async id => {
+  try {
+    await api("/admin/players/title", {
+      method: "POST",
+      body: JSON.stringify({character_id: id, title: $(`title-${id}`).value})
+    });
+    toast("Титул назначен");
+    await loadAdminPlayers();
+  } catch (error) { toast(error.message); }
+};
+
+window.savePlayerMarriage = async id => {
+  try {
+    const value=$(`spouse-${id}`).value;
+    await api('/admin/players/marriage',{
+      method:'POST',body:JSON.stringify({character_id:id,spouse_character_id:value?Number(value):null})
+    });
+    toast(value?'Игроки объединены в совместный дом':'Статус брака снят');
+    state.adminPlayers=null;
+    await loadAdminPlayers();
+    await refresh();
+    state.view='customization';render();
+  }catch(error){toast(error.message)}
+};
+
+async function reportPresence(view) {
+  try {
+    await api("/presence", {method: "POST", body: JSON.stringify({view})});
+  } catch (_) {}
+}
 
 function moreView() {
   return section("✨ Разделы", `
@@ -1383,11 +1610,12 @@ window.go = view => {
   if(view==='games') loadDuelCenter(true);
   if(view==='house') loadEstate(true);
   if(view==='npcs') loadNpcs(true);
-  if(view==='friends') loadFriends(true);
-  if(view==='statistics') loadStatistics(true);
-  if(view==='customization' && state.data?.is_admin) loadAdminPlayers(true);
+  if(view==='friends') loadFriends();
+  if(view==='statistics') loadStatistics();
+  if(view==='customization' && state.data?.is_admin) loadAdminPlayers();
   if(view==='customization' && state.data?.is_owner) loadProjectAdmins(true);
   render();
+  reportPresence(view);
   tg?.HapticFeedback?.selectionChanged?.();
 };
 
@@ -1401,11 +1629,11 @@ async function refresh() {
 
 window.develop = async (stat, amount) => {
   try {
-    await api("/development", {
+    const result = await api("/development", {
       method: "POST",
       body: JSON.stringify({ stat, amount })
     });
-    toast("Характеристика улучшена");
+    toast(result.faction_bonus ? `Фракционный бонус: получено +${result.gained}` : `Получено +${result.gained}`);
     await refresh();
     go("development");
   } catch (error) {
@@ -1506,6 +1734,8 @@ $("imageViewer")?.addEventListener("click", event => {
     if (!initData) throw new Error("Откройте Mini App внутри Telegram");
 
     await refresh();
+    reportPresence(state.view);
+    setInterval(() => reportPresence(state.view), 60000);
 
     const startParam = tg?.initDataUnsafe?.start_param || "";
     if (startParam.startsWith("attack_")) {

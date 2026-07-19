@@ -8,6 +8,7 @@ from app.keyboards import stats_keyboard, professions_keyboard, factions_keyboar
 from app.models import User
 from app.services import apply_levels, get_character, get_system_media, local_date
 from app.work_catalog import profession_by_key, title_can_use
+from app.factions import WESTERN_FACTION, NEUTRAL_DIALOGUE, faction_payload
 
 router = Router()
 
@@ -107,8 +108,9 @@ async def factions(message: Message, session: AsyncSession) -> None:
     text = (
         "🚩 <b>Фракции Королевства</b>\n\n"
         f"Ваша фракция: {c.faction}\n\n"
-        "Западная сторона — порядок, сила и контроль территорий.\n"
-        "Нейтральный Диалог — дипломатия, баланс и переговоры."
+        f"{WESTERN_FACTION} — сила, выносливость и защита владений.\n"
+        f"{NEUTRAL_DIALOGUE} — интеллект, харизма и магическое влияние.\n\n"
+        "Фракцию назначает создатель через панель управления."
     )
     file_id = await get_system_media(session, "factions")
     if file_id:
@@ -124,8 +126,9 @@ async def factions_callback(callback: CallbackQuery, session: AsyncSession) -> N
     text = (
         "🚩 <b>Фракции Королевства</b>\n\n"
         f"Ваша фракция: {c.faction}\n\n"
-        "Западная сторона — порядок, сила и контроль территорий.\n"
-        "Нейтральный Диалог — дипломатия, баланс и переговоры."
+        f"{WESTERN_FACTION} — сила, выносливость и защита владений.\n"
+        f"{NEUTRAL_DIALOGUE} — интеллект, харизма и магическое влияние.\n\n"
+        "Фракцию назначает создатель через панель управления."
     )
     file_id = await get_system_media(session, "factions")
     if file_id:
@@ -136,8 +139,7 @@ async def factions_callback(callback: CallbackQuery, session: AsyncSession) -> N
 
 @router.callback_query(F.data.startswith("faction:"))
 async def select_faction(callback: CallbackQuery, session: AsyncSession) -> None:
-    c = await get_character(session, callback.from_user.id)
-    faction = callback.data.split(":", 1)[1]
-    c.faction = faction
-    await callback.message.edit_text(f"✅ Новая фракция: {faction}")
-    await callback.answer()
+    await callback.answer(
+        "Фракцию назначает создатель через панель управления.",
+        show_alert=True,
+    )

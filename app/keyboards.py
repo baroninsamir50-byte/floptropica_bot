@@ -1,4 +1,5 @@
 from app.work_catalog import available_professions
+from app.factions import WESTERN_FACTION, NEUTRAL_DIALOGUE, NO_FACTION, VIEW_LABELS
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
@@ -65,9 +66,7 @@ def professions_keyboard(title: str = "") -> InlineKeyboardMarkup:
 
 def factions_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌅 Западная сторона", callback_data="faction:Западная сторона")],
-        [InlineKeyboardButton(text="🕊 Нейтральный Диалог", callback_data="faction:Нейтральный Диалог")],
-        [InlineKeyboardButton(text="🚪 Покинуть фракцию", callback_data="faction:Нет")],
+        [InlineKeyboardButton(text="ℹ Фракцию назначает создатель", callback_data="faction:locked")],
     ])
 
 
@@ -82,17 +81,38 @@ def npc_keyboard() -> InlineKeyboardMarkup:
 def admin_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👥 Настройки игроков", callback_data="admin:players")]])
 
-def admin_players_keyboard(players: list[tuple[int,str,str]]) -> InlineKeyboardMarkup:
-    rows=[[InlineKeyboardButton(text=f"{name} — {title}", callback_data=f"adminplayer:{tid}")] for tid,name,title in players]
+def admin_players_keyboard(players: list[tuple[int, str, str, str]]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text=f"{name} — {title} · {VIEW_LABELS.get(view, view or 'Вне Mini App')}",
+        callback_data=f"adminplayer:{tid}",
+    )] for tid, name, title, view in players]
     rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 def admin_roles_keyboard(tid: int) -> InlineKeyboardMarkup:
-    roles=[("👤 Гражданин","citizen"),("🌅 Лидер Запада","leader_west"),("🕊 Лидер Диалога","leader_neutral"),("👑 Король","king"),("👑 Королева","queen"),("👸 Королевна","princess")]
-    rows=[[InlineKeyboardButton(text=label, callback_data=f"setrole:{tid}:{key}")] for label,key in roles]
-    rows.append([InlineKeyboardButton(text="⬅ К игрокам", callback_data="admin:players")])
+    rows = [
+        [InlineKeyboardButton(text="👑 Король", callback_data=f"settitle:{tid}:king"),
+         InlineKeyboardButton(text="👑 Королева", callback_data=f"settitle:{tid}:queen")],
+        [InlineKeyboardButton(text="✨ Хорги", callback_data=f"settitle:{tid}:horgi"),
+         InlineKeyboardButton(text="🔮 Чародей", callback_data=f"settitle:{tid}:sorcerer")],
+        [InlineKeyboardButton(text="👥 Жители", callback_data=f"settitle:{tid}:residents")],
+        [InlineKeyboardButton(text=f"🌅 {WESTERN_FACTION}", callback_data=f"setfaction:{tid}:west")],
+        [InlineKeyboardButton(text=f"🕊 {NEUTRAL_DIALOGUE}", callback_data=f"setfaction:{tid}:neutral")],
+        [InlineKeyboardButton(text="🚩 Без фракции", callback_data=f"setfaction:{tid}:none")],
+        [InlineKeyboardButton(text="💍 Назначить брак", callback_data=f"marriagepick:{tid}"),
+         InlineKeyboardButton(text="💔 Снять брак", callback_data=f"clearmarriage:{tid}")],
+        [InlineKeyboardButton(text="⬅ К игрокам", callback_data="admin:players")],
+    ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
+
+
+def admin_marriage_keyboard(target_tid: int, players: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text=f"💍 {name}", callback_data=f"setmarriage:{target_tid}:{telegram_id}",
+    )] for telegram_id, name in players if telegram_id != target_tid]
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data=f"adminplayer:{target_tid}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def games_keyboard() -> InlineKeyboardMarkup:

@@ -68,4 +68,4 @@ async def run_tasks(key: str = Query(default="")) -> dict[str, str]:
 
 @app.get("/version")
 async def version():
-    return {"version":"7.7.1","ui_update":True,"automatic_scroll":False,"repair_cost":15,"salary_multiplier":2.5}
+    return {"version":"7.7.4","friends_fixed":True,"visits":True,"shared_households":True,"npc_upgrades":True,"npc_materials_consumed":True,"guard_level_appearances":True,"summer_guard_until":"2026-08-25","work_reward_multiplier":1.5}
