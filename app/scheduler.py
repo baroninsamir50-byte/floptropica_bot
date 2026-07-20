@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.config import get_settings
 from app.database import SessionFactory
 from app.models import Character, House, HouseAttack, NpcUnit, User
+from app.services import npc_power
 
 _task_lock = asyncio.Lock()
 
@@ -201,11 +202,16 @@ async def resolve_guard_battles(bot: Bot):
                 sum(g.level for g in guards) / len(guards)
                 if guards else 1
             )
+            avg_power = (
+                sum(npc_power(g) for g in guards) / len(guards)
+                if guards else 10
+            )
             chance = min(
                 94,
-                28
-                + len(guards) * 11
-                + int(avg_level * 5)
+                22
+                + len(guards) * 9
+                + int(avg_level * 2)
+                + int(avg_power / 7)
                 + house.defense // 2
                 - max(0, attack.enemy_power - 35) // 2,
             )
@@ -216,9 +222,8 @@ async def resolve_guard_battles(bot: Bot):
                 guard.assignment = None
                 guard.available_at = None
                 guard.experience += 10 + attack.enemy_power // 10
-                if guard.experience >= 40 * guard.level:
-                    guard.experience -= 40 * guard.level
-                    guard.level += 1
+                guard.strength += 1
+                guard.endurance += 1
 
             if randint(1, 100) <= chance:
                 attack.status = "guards_won"

@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.models import Character, GoldTransaction, InventoryItem, ItemTemplate, OwnedNpc, SystemMedia, User
-from app.work_catalog import profession_by_name, title_can_use
+from app.work_catalog import profession_by_name, title_can_use, profession_income_multiplier
 
 
 GUARD_UPGRADE_ITEMS = (
@@ -23,15 +23,51 @@ FARMER_UPGRADE_ITEMS = (
 )
 NPC_UPGRADE_ITEMS = GUARD_UPGRADE_ITEMS + FARMER_UPGRADE_ITEMS
 WORK_REWARD_MULTIPLIER = 1.5
+WORK_SHIFT_LIMIT = 6
 
 
-def guard_model_variant(level: int) -> int:
-    """Выбирает загруженный облик стражника по его уровню."""
+NPC_MAX_LEVEL = 50
+
+
+def npc_model_variant(level: int) -> int:
+    """Облик NPC меняется после возвышения на 20-м и 30-м уровнях."""
     if level >= 30:
         return 3
     if level >= 20:
         return 2
     return 1
+
+
+def guard_model_variant(level: int) -> int:
+    """Совместимый псевдоним для старых тестов и вызовов."""
+    return npc_model_variant(level)
+
+
+def npc_upgrade_plan(level: int) -> dict[str, object]:
+    """Темп развития: быстрый 1–19, средний 20–29, медленный 30–50."""
+    if level >= NPC_MAX_LEVEL:
+        return {"max_level": True, "cost": 0, "requires_kit": False, "stage": "Максимальный ранг"}
+    if level in {19, 29}:
+        return {"max_level": False, "cost": 0, "requires_kit": True, "stage": "Возвышение"}
+    if level < 19:
+        return {"max_level": False, "cost": 3, "requires_kit": False, "stage": "Быстрое обучение"}
+    if level < 29:
+        return {"max_level": False, "cost": 8, "requires_kit": False, "stage": "Среднее обучение"}
+    return {"max_level": False, "cost": 15, "requires_kit": False, "stage": "Высшее обучение"}
+
+
+def npc_stat_gains(npc_type: str, ascension: bool = False) -> dict[str, int]:
+    if npc_type == "guard":
+        gains = {"strength": 2, "endurance": 2, "agility": 1, "skill": 1}
+    else:
+        gains = {"strength": 1, "endurance": 2, "agility": 1, "skill": 2}
+    if ascension:
+        gains = {name: value + 5 for name, value in gains.items()}
+    return gains
+
+
+def npc_power(npc) -> int:
+    return int(npc.level * 2 + npc.strength * 2 + npc.endurance * 2 + npc.agility + npc.skill * 2)
 
 
 
@@ -107,6 +143,7 @@ async def seed_items(session: AsyncSession) -> None:
         ("guardian_cat", "Кот-страж", "+3 к выносливости", 32, "pet", "Эпический", "endurance", 3),
         ("healing_potion", "Зелье здоровья", "+10 к запасу здоровья", 5, None, "Обычный", "health", 10),
         ("greater_healing_potion", "Большое зелье здоровья", "+25 к запасу здоровья", 11, None, "Необычный", "health", 25),
+        ("house_repair_potion", "Зелье ремонта дома", "Бесплатно восстанавливает разрушенное владение до 100 прочности.", 18, None, "Титульная награда", None, 0),
         ("mana_crystal", "Кристалл маны", "+15 к запасу маны", 10, None, "Необычный", "mana", 15),
         ("guard_upgrade_sword", "Клинок стражи", "Часть полного комплекта улучшения стражника: меч.", 10, None, "Комплект NPC", None, 0),
         ("guard_upgrade_boots", "Сапоги караула", "Часть полного комплекта улучшения стражника: сапоги.", 8, None, "Комплект NPC", None, 0),
@@ -136,7 +173,7 @@ async def get_daily_shop_items(session: AsyncSession, count: int = 6) -> list[It
     items = list(result.scalars().all())
     special = next((x for x in items if x.slug == "development_points_30"), None)
     material_items = [x for x in items if x.slug in NPC_UPGRADE_ITEMS]
-    regular = [x for x in items if x.slug != "development_points_30" and x.slug not in NPC_UPGRADE_ITEMS]
+    regular = [x for x in items if x.slug not in {"development_points_30", "house_repair_potion"} and x.slug not in NPC_UPGRADE_ITEMS]
     seed = int.from_bytes(hashlib.sha256(f"shop:{local_date()}".encode()).digest()[:8], "big")
     rng = Random(seed)
     daily_material = rng.choice(material_items) if material_items else None
@@ -155,8 +192,8 @@ async def start_work(character: Character, profession: str | None = None) -> str
         raise ValueError("Сначала получите награду в Казне.")
     if character.work_count_date != today:
         character.work_count_date, character.work_count = today, 0
-    if character.work_count >= 2:
-        raise ValueError("Сегодня вы уже отработали две смены.")
+    if character.work_count >= WORK_SHIFT_LIMIT:
+        raise ValueError("Сегодня вы уже отработали шесть смен.")
     selected = profession or character.profession
     profession_data = profession_by_name(selected)
     if not profession_data:
@@ -172,7 +209,24 @@ async def start_work(character: Character, profession: str | None = None) -> str
     return f"Смена «{selected}» началась на 2 часа."
 
 
-async def claim_work(session: AsyncSession, character: Character) -> tuple[int, int]:
+async def grant_inventory_item(session: AsyncSession, character: Character, slug: str) -> ItemTemplate:
+    item = await session.scalar(select(ItemTemplate).where(ItemTemplate.slug == slug))
+    if not item:
+        raise ValueError("Предмет награды не найден.")
+    inventory_item = await session.scalar(
+        select(InventoryItem).where(
+            InventoryItem.character_id == character.id,
+            InventoryItem.item_id == item.id,
+        )
+    )
+    if inventory_item:
+        inventory_item.quantity += 1
+    else:
+        session.add(InventoryItem(character_id=character.id, item_id=item.id, quantity=1))
+    return item
+
+
+async def claim_work(session: AsyncSession, character: Character) -> tuple[int, int, str | None]:
     now = datetime.now(timezone.utc)
     if not character.work_ends_at or character.work_reward_claimed:
         raise ValueError("У вас нет завершённой работы.")
@@ -190,7 +244,8 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
     else:
         gold_range, xp_range, bonus_stat = (1, 5), (5, 10), None
     multiplier = level_income_multiplier(character.level)
-    gold = max(1, int(randint(*gold_range) * multiplier * WORK_REWARD_MULTIPLIER))
+    role_multiplier = profession_income_multiplier(character.title, profession_data)
+    gold = max(1, int(randint(*gold_range) * multiplier * WORK_REWARD_MULTIPLIER * role_multiplier))
     xp = randint(*xp_range) + character.level // 3
     await change_gold(session, character, gold, f"work_reward:{profession}")
     character.experience += xp
@@ -198,7 +253,14 @@ async def claim_work(session: AsyncSession, character: Character) -> tuple[int, 
         setattr(character, bonus_stat, getattr(character, bonus_stat) + 1)
     character.work_reward_claimed = True
     apply_levels(character)
-    return gold, xp
+    title_reward = None
+    magical_titles = {"Хорги", "Чародей", "Волшебник"}
+    if character.title in magical_titles and character.title_reward_date != local_date():
+        reward_slug = "healing_potion" if randint(0, 1) == 0 else "house_repair_potion"
+        reward_item = await grant_inventory_item(session, character, reward_slug)
+        character.title_reward_date = local_date()
+        title_reward = reward_item.name
+    return gold, xp, title_reward
 
 
 async def buy_item(session: AsyncSession, character: Character, item_id: int) -> ItemTemplate:

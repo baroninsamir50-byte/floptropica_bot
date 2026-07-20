@@ -68,4 +68,4 @@ async def run_tasks(key: str = Query(default="")) -> dict[str, str]:
 
 @app.get("/version")
 async def version():
-    return {"version":"7.7.4","friends_fixed":True,"visits":True,"shared_households":True,"npc_upgrades":True,"npc_materials_consumed":True,"guard_level_appearances":True,"summer_guard_until":"2026-08-25","work_reward_multiplier":1.5}
+    return {"version":"7.7.5","work_shifts":6,"work_reward_multiplier":1.5,"title_income_bonuses":True,"title_potions":True,"npc_progression":"1-50 with ascension at 20 and 30","npc_stats":True,"player_stories":True,"story_slideshow":True,"friends_visits":True,"shared_households":True,"summer_guard_until":"2026-08-25"}

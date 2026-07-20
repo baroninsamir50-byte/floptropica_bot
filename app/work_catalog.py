@@ -35,7 +35,6 @@ WORK_PROFESSIONS: dict[str, dict[str, object]] = {
         "gold": (5, 9),
         "xp": (12, 18),
         "bonus_stat": "charisma",
-        "required_titles": {"Король", "Королева"},
     },
     "faction_chair": {
         "name": "Председатель фракции",
@@ -43,7 +42,6 @@ WORK_PROFESSIONS: dict[str, dict[str, object]] = {
         "gold": (4, 8),
         "xp": (10, 16),
         "bonus_stat": "charisma",
-        "required_titles": {"Король", "Королева", "Хорги", "Чародей"},
     },
     "royal_designer": {
         "name": "Королевский художник-дизайнер",
@@ -101,6 +99,33 @@ WORK_PROFESSIONS: dict[str, dict[str, object]] = {
         "xp": (10, 16),
         "bonus_stat": "luck",
     },
+    "faction_debates": {
+        "name": "Дебаты",
+        "label": "🗣 Дебаты",
+        "gold": (4, 8),
+        "xp": (11, 17),
+        "bonus_stat": "charisma",
+        "required_titles": {"Лидер фракции"},
+        "income_bonus": 0.2,
+    },
+    "faction_development": {
+        "name": "Развитие фракции",
+        "label": "🏛 Развитие фракции",
+        "gold": (4, 8),
+        "xp": (11, 17),
+        "bonus_stat": "intelligence",
+        "required_titles": {"Лидер фракции"},
+        "income_bonus": 0.2,
+    },
+    "senate_chair": {
+        "name": "Председатель сената",
+        "label": "⚜ Председатель сената",
+        "gold": (5, 9),
+        "xp": (12, 18),
+        "bonus_stat": "charisma",
+        "required_titles": {"Лидер фракции"},
+        "income_bonus": 0.2,
+    },
 }
 
 
@@ -128,3 +153,13 @@ def available_professions(title: str) -> list[tuple[str, dict[str, object]]]:
 def title_can_use(title: str, data: dict[str, object]) -> bool:
     required_titles = data.get("required_titles")
     return not required_titles or title in required_titles
+
+
+def profession_income_multiplier(title: str, data: dict[str, object] | None) -> float:
+    """Бонусы титула к выплате за конкретную смену."""
+    multiplier = 1.0
+    if title in {"Король", "Королева"}:
+        multiplier += 0.5
+    if title == "Лидер фракции" and data:
+        multiplier += float(data.get("income_bonus", 0.0))
+    return multiplier

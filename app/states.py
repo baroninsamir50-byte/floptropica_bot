@@ -18,3 +18,14 @@ class ChangeHousePhoto(StatesGroup):
 
 class AdminMediaUpload(StatesGroup):
     photo = State()
+
+
+class StoryCreation(StatesGroup):
+    introduction_text = State()
+    introduction_photo = State()
+    main_part_one_text = State()
+    main_part_one_photo = State()
+    main_part_two_text = State()
+    main_part_two_photo = State()
+    ending_text = State()
+    ending_photo = State()
