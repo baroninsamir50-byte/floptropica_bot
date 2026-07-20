@@ -63,6 +63,7 @@ class Character(Base):
     spouse_character_id: Mapped[int | None] = mapped_column(ForeignKey("characters.id"), index=True)
     summer_guard_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
     daily_npc_material_date: Mapped[str | None] = mapped_column(String(10))
+    title_reward_date: Mapped[str | None] = mapped_column(String(10))
     title: Mapped[str] = mapped_column(String(64), default="Жители")
     training_date: Mapped[str | None] = mapped_column(String(10))
     work_count_date: Mapped[str | None] = mapped_column(String(10))
@@ -293,6 +294,10 @@ class NpcUnit(Base):
     level: Mapped[int] = mapped_column(Integer, default=1)
     upgrade_count: Mapped[int] = mapped_column(Integer, default=0)
     experience: Mapped[int] = mapped_column(Integer, default=0)
+    strength: Mapped[int] = mapped_column(Integer, default=5)
+    endurance: Mapped[int] = mapped_column(Integer, default=5)
+    agility: Mapped[int] = mapped_column(Integer, default=5)
+    skill: Mapped[int] = mapped_column(Integer, default=5)
     fatigue: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="idle", index=True)
     assignment: Mapped[str | None] = mapped_column(String(40))
@@ -300,6 +305,26 @@ class NpcUnit(Base):
     last_rest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     alive: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlayerStory(Base):
+    __tablename__ = "player_stories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    introduction: Mapped[str] = mapped_column(Text)
+    main_part_one: Mapped[str] = mapped_column(Text)
+    main_part_two: Mapped[str] = mapped_column(Text)
+    ending: Mapped[str] = mapped_column(Text)
+    introduction_image_file_id: Mapped[str | None] = mapped_column(Text)
+    main_part_one_image_file_id: Mapped[str | None] = mapped_column(Text)
+    main_part_two_image_file_id: Mapped[str | None] = mapped_column(Text)
+    ending_image_file_id: Mapped[str | None] = mapped_column(Text)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
 
 class TarotCard(Base):

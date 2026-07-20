@@ -13,7 +13,7 @@ from aiogram.types import (
 from app.config import get_settings
 from app.database import init_database, SessionFactory
 from app.middlewares import DatabaseMiddleware
-from app.routers import admin, common, economy, gameplay, games, house_defense, miniapp, profile, registration
+from app.routers import admin, common, economy, gameplay, games, house_defense, miniapp, profile, registration, story
 from app.services import seed_items
 from app.tarot_service import seed_standard_tarot
 from app.scheduler import house_attack_loop, process_due_game_tasks
@@ -42,6 +42,7 @@ async def run_bot() -> None:
 
     dp.include_router(registration.router)
     dp.include_router(profile.router)
+    dp.include_router(story.router)
     dp.include_router(gameplay.router)
     dp.include_router(economy.router)
     dp.include_router(games.router)
@@ -62,6 +63,7 @@ async def run_bot() -> None:
         BotCommand(command="daily", description="Ежедневный подарок"),
         BotCommand(command="work", description="Начать работу"),
         BotCommand(command="work_status", description="Получить награду"),
+        BotCommand(command="story", description="Создать сюжет героя"),
         BotCommand(command="games", description="Игровая арена"),
         BotCommand(command="duel", description="Вызвать на дуэль"),
         BotCommand(command="expedition", description="Экспедиция до 6 игроков"),

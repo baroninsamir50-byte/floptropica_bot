@@ -5,7 +5,7 @@ NEUTRAL_DIALOGUE = "НЕЙТРАЛЬНЫЙ ДИАЛОГ"
 NO_FACTION = "Не назначена"
 
 FACTIONS = (WESTERN_FACTION, NEUTRAL_DIALOGUE)
-TITLES = ("Король", "Королева", "Хорги", "Чародей", "Жители")
+TITLES = ("Король", "Королева", "Лидер фракции", "Хорги", "Чародей", "Волшебник", "Жители")
 
 FACTION_DATA: dict[str, dict[str, object]] = {
     WESTERN_FACTION: {
@@ -38,6 +38,7 @@ VIEW_LABELS = {
     "npcs": "NPC",
     "friends": "Друзья",
     "friend-detail": "Просмотр друга",
+    "friend-story": "История игрока",
     "statistics": "Статистика",
     "more": "Другие разделы",
 }

@@ -16,9 +16,9 @@ async def myid(message:Message):
 @router.message(Command("help","помощь"))
 async def help_command(message:Message):
     await message.answer(
-        "📜 <b>Команды v5.0</b>\n"
+        "📜 <b>Команды v7.7.5</b>\n"
         "/menu /profile /house /map /shop /work /work_status\n"
-        "/games /duel /expedition /ping /myid"
+        "/games /duel /expedition /story /ping /myid"
     )
 
 

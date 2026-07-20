@@ -20,6 +20,8 @@ const state = {
   friendsLoading: false,
   friendsError: null,
   selectedFriend: null,
+  selectedStory: null,
+  storyIndex: 0,
   statistics: null,
   adminPlayers: null,
   projectAdmins: null,
@@ -28,6 +30,7 @@ const state = {
   duelPoll: null
 };
 const $ = id => document.getElementById(id);
+const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
 const content = $("content");
 const initData = tg?.initData || "";
 
@@ -405,6 +408,7 @@ function houseView() {
       <div class="row"><span>👹 Уровень угрозы</span><b>${estate.house.threat_level}</b></div>
       <div class="estate-actions-grid">
         <button class="btn gold" onclick="repairEstate()" ${h.integrity >= 100 ? "disabled" : ""}>🔨 Ремонт · 15 🪙</button>
+        <button class="btn magic" onclick="repairEstatePotion()" ${(h.integrity >= 100 || !estate.repair_potions) ? "disabled" : ""}>🧪 Зелье ремонта · ${estate.repair_potions}</button>
         <button class="btn secondary" onclick="cleanEstate('self')" ${estate.house.cleaning_available ? "" : "disabled"}>🧹 Убраться</button>
         <button class="btn secondary" onclick="cleanEstate('peasant')" ${estate.house.cleaning_available ? "" : "disabled"}>🌾 Фермер</button>
         <button class="btn secondary" onclick="go('npcs')">👥 NPC</button>
@@ -423,6 +427,14 @@ window.repairEstate = async () => {
   try {
     const result = await api("/estate/repair", { method: "POST" });
     toast(`Восстановлено ${result.restored} прочности за ${result.cost} золота`);
+    await refresh(); await loadEstate(true); render();
+  } catch (error) { toast(error.message); }
+};
+
+window.repairEstatePotion = async () => {
+  try {
+    const result = await api("/estate/repair-potion", { method: "POST" });
+    toast(result.message);
     await refresh(); await loadEstate(true); render();
   } catch (error) { toast(error.message); }
 };
@@ -524,6 +536,7 @@ function treasuryView() {
         ${d.hero.profession === p.name ? '<span class="badge">Выбрано</span>' : ""}
       </div>
       <p>${p.gold[0]}–${p.gold[1]} 🪙 · ${p.xp[0]}–${p.xp[1]} XP</p>
+      ${p.role_bonus > 0 ? `<small class="role-income-bonus">Бонус титула: +${Math.round(p.role_bonus*100)}% к доходу</small>` : ""}
       <button class="btn secondary" onclick="chooseProfession('${p.key}')">
         Выбрать профессию
       </button>
@@ -535,7 +548,7 @@ function treasuryView() {
         <div class="eyebrow">КОРОЛЕВСКАЯ СЛУЖБА</div>
         <div class="compact-meta">
           <span>${d.hero.profession}</span>
-          <span>${work.count}/2 смен</span>
+          <span>${work.count}/6 смен</span>
           <span>${work.active ? "Работа идёт" : "Свободен"}</span>
         </div>
         <div class="action-grid">
@@ -543,6 +556,10 @@ function treasuryView() {
           <button class="btn secondary" onclick="claimWork()">Получить награду</button>
         </div>
       </div>
+    </div>
+    <div class="panel title-work-benefits">
+      <b>Бонус титула</b>
+      <p>${["Король","Королева"].includes(d.hero.title) ? "👑 +50% к доходу каждой смены." : d.hero.title === "Лидер фракции" ? "🚩 Открыты Дебаты, Развитие фракции и Председатель сената. Эти смены дают +20%." : ["Хорги","Чародей","Волшебник"].includes(d.hero.title) ? "🧪 Раз в сутки после смены выдаётся зелье здоровья или ремонта дома." : "Любая обычная профессия доступна без ограничений."}</p>
     </div>
 
     <div class="cards profession-list">${professions}</div>`);
@@ -587,6 +604,8 @@ function inventoryView() {
             onclick="equip(${item.inventory_id})">
             ${item.equipped ? "Снять" : "Надеть"}
           </button>` : ""}
+        ${["healing_potion","greater_healing_potion"].includes(item.slug) ? `<button class="btn magic" onclick="useInventoryItem(${item.inventory_id})">🧪 Использовать</button>` : ""}
+        ${item.slug === "house_repair_potion" ? `<button class="btn magic" onclick="go('house')">🏰 Использовать во владении</button>` : ""}
       </div>`).join("")
     : `<div class="panel muted">Инвентарь пуст</div>`;
 
@@ -1054,27 +1073,35 @@ async function loadNpcs(silent=false){
 function npcCard(npc){
   const dead=!npc.alive;
   const materials=(npc.upgrade_materials||[]).map(item=>`<span class="npc-material ${item.owned?'owned':'missing'}">${item.owned?'✓':'○'} ${item.name}</span>`).join('');
+  const stats=npc.stats||{};
+  const upgradeContent = npc.max_level
+    ? `<div class="npc-max-rank">🏆 Максимальный 50-й уровень</div>`
+    : `<div class="npc-upgrade-box">
+        <b>${npc.upgrade_stage} · ур. ${npc.level} → ${npc.next_level}</b>
+        <small class="muted">${npc.progression_rule}</small>
+        ${npc.requires_kit ? `<div class="npc-ascension-title">✨ Возвышение: нужен полный комплект</div><div class="npc-material-list">${materials}</div><small class="muted">Все 5 предметов исчезнут после возвышения.</small>` : `<div class="npc-level-price">Стоимость: <b>${npc.upgrade_cost} 🪙</b></div>`}
+        <button class="btn gold" onclick="upgradeNpc(${npc.id})" ${npc.upgrade_ready?'':'disabled'}>${npc.requires_kit?'✨ Возвысить NPC':'⬆ Повысить уровень'}</button>
+      </div>`;
   return `<article class="npc-card ${dead?'dead':''}">
     <div class="npc-model">
-      <img src="${npc.model_url}" alt="${npc.name}" onerror="this.style.display='none'">
+      <img src="${npc.model_url}" alt="${escapeHtml(npc.name)}" onerror="this.style.display='none'">
       <span>${npc.type==='guard'?'🛡':'🌾'}</span>
     </div>
     <div class="npc-copy">
-      <div class="row"><h3>${npc.name}</h3><span class="badge">Ур. ${npc.level}</span></div>
-      ${npc.owner_name ? `<small>Владелец: ${npc.owner_name}</small>` : ''}
+      <div class="row"><h3>${escapeHtml(npc.name)}</h3><span class="badge">Ур. ${npc.level}</span></div>
+      ${npc.owner_name ? `<small>Владелец: ${escapeHtml(npc.owner_name)}</small>` : ''}
+      <div class="npc-power-line">⚡ Общая сила: <b>${npc.power}</b></div>
+      <div class="npc-stats-grid">
+        <span>Сила <b>${stats.strength??0}</b></span><span>Выносливость <b>${stats.endurance??0}</b></span>
+        <span>Ловкость <b>${stats.agility??0}</b></span><span>${npc.type==='guard'?'Защита':'Навык'} <b>${stats.skill??0}</b></span>
+      </div>
       <div class="stat-head"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
       <div class="bar fatigue"><i style="width:${npc.fatigue}%"></i></div>
       <small>${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
-      ${!dead ? `<div class="npc-upgrade-box">
-        <b>Улучшение №${npc.upgrade_count+1} · ${npc.upgrade_cost} 🪙</b>
-        ${npc.appearance_rule?`<small class="muted">${npc.appearance_rule}</small>`:''}
-        <div class="npc-material-list">${materials}</div>
-        <small class="muted">После улучшения комплект из 5 предметов будет использован.</small>
-        <button class="btn gold" onclick="upgradeNpc(${npc.id})" ${npc.upgrade_ready?'':'disabled'}>⬆ Улучшить NPC</button>
-      </div>` : ''}
+      ${!dead ? upgradeContent : ''}
       ${!dead?npc.type==='guard'?`
         <div class="action-grid">
-          <button class="btn secondary" onclick="npcAction(${npc.id},'school')">🏫 Школа</button>
+          <button class="btn secondary" onclick="npcAction(${npc.id},'school')">🏫 Школа навыка</button>
           <button class="btn gold" onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
         </div>`:`
         <div class="npc-task-grid">
@@ -1087,6 +1114,7 @@ function npcCard(npc){
     </div>
   </article>`;
 }
+
 function npcsView(){
   if(!state.npcs){setTimeout(()=>loadNpcs(),0);return section("👥 NPC",'<div class="panel">Загружаем NPC…</div>')}
   const d=state.npcs;
@@ -1365,7 +1393,10 @@ function friendCard(player) {
       </div>
       <p>${player.title}${player.is_me ? ' · Это вы' : ''}</p>
       <small>${player.faction}</small>
-      <button class="btn secondary" onclick="openFriend(${player.id})">Подробнее</button>
+      <div class="friend-card-actions">
+        <button class="btn secondary" onclick="openFriend(${player.id})">Подробнее</button>
+        ${player.story_available ? `<button class="btn gold" onclick="openFriendStory(${player.id})">📖 Рассказать историю</button>` : ""}
+      </div>
     </div>
   </article>`;
 }
@@ -1430,6 +1461,7 @@ function friendDetailView() {
         ${player.spouse?`<div class="row"><span>💍 В браке</span><b>${player.spouse.name}</b></div>`:''}
       </div>
     </div>
+    ${player.story_available ? `<button class="btn story-button" onclick="openFriendStory(${player.id})">📖 Рассказать историю ${escapeHtml(player.name)}</button>` : ""}
     <h3 class="subheading">🏰 В гостях</h3>
     <div class="friend-house-banner">
       ${house?.image_available
@@ -1446,6 +1478,47 @@ function friendDetailView() {
     </div>
     <h3 class="subheading">🚪 Комнаты</h3><div class="friend-room-list">${rooms||'<div class="panel muted">Комнат пока нет.</div>'}</div>` : ""}
     <button class="btn secondary" onclick="go('friends')">← Вернуться к игрокам</button>`);
+}
+
+window.openFriendStory = async id => {
+  try {
+    state.selectedStory = await api(`/friends/${id}/story`);
+    state.storyIndex = 0;
+    state.view = "friend-story";
+    reportPresence("friend-story");
+    render();
+  } catch (error) { toast(error.message); }
+};
+
+window.changeStorySlide = direction => {
+  if (!state.selectedStory) return;
+  const max = state.selectedStory.parts.length - 1;
+  state.storyIndex = Math.max(0, Math.min(max, state.storyIndex + direction));
+  render();
+};
+
+function friendStoryView() {
+  const story=state.selectedStory;
+  if(!story) return section("📖 История", `<div class="panel">История не загружена.</div><button class="btn secondary" onclick="go('friends')">← К игрокам</button>`);
+  const part=story.parts[state.storyIndex];
+  const total=story.parts.length;
+  const image=part.image_available
+    ? `<img class="image-loading" data-protected-image="/friends/${story.character.id}/story/${part.key}/image" alt="${escapeHtml(part.label)}">`
+    : `<img class="image-loading" data-protected-image="/friends/${story.character.id}/portrait" alt="${escapeHtml(story.character.name)}">`;
+  return section(`📖 История · ${escapeHtml(story.character.name)}`, `
+    <article class="visual-novel-scene">
+      <div class="novel-image">${image}<div class="novel-progress">${state.storyIndex+1}/${total}</div></div>
+      <div class="novel-dialogue">
+        <div class="novel-speaker"><span>${escapeHtml(story.character.name)}</span><small>${escapeHtml(part.label)}</small></div>
+        <p>${escapeHtml(part.text).replace(/\n/g,"<br>")}</p>
+      </div>
+    </article>
+    <div class="novel-controls">
+      <button class="btn secondary" onclick="changeStorySlide(-1)" ${state.storyIndex===0?'disabled':''}>← Назад</button>
+      <button class="btn gold" onclick="changeStorySlide(1)" ${state.storyIndex===total-1?'disabled':''}>Далее →</button>
+    </div>
+    <button class="btn secondary" onclick="openFriend(${story.character.id})">Вернуться в дом игрока</button>
+  `);
 }
 
 window.repairFriendHouse=async id=>{
@@ -1582,6 +1655,7 @@ function render() {
     npcs: npcsView,
     friends: friendsView,
     'friend-detail': friendDetailView,
+    'friend-story': friendStoryView,
     statistics: statisticsView,
     more: moreView
   };
@@ -1669,7 +1743,7 @@ window.startWork = async () => {
 window.claimWork = async () => {
   try {
     const result = await api("/work/claim", { method: "POST" });
-    toast(`Получено ${result.gold} золота и ${result.xp} XP`);
+    toast(`Получено ${result.gold} золота и ${result.xp} XP${result.title_reward ? ` · 🎁 ${result.title_reward}` : ""}`);
     await refresh();
     go("treasury");
   } catch (error) {
@@ -1703,6 +1777,15 @@ window.equip = async inventoryId => {
   } catch (error) {
     toast(error.message);
   }
+};
+
+window.useInventoryItem = async inventory_id => {
+  try {
+    const result = await api("/inventory/use", {method:"POST", body:JSON.stringify({inventory_id})});
+    toast(result.message);
+    await refresh();
+    go("inventory");
+  } catch (error) { toast(error.message); }
 };
 
 window.claimDaily = async () => {

@@ -54,15 +54,21 @@ async def init_database() -> None:
             "CREATE INDEX IF NOT EXISTS ix_characters_spouse_character_id ON characters(spouse_character_id)",
             "ALTER TABLE characters ADD COLUMN IF NOT EXISTS summer_guard_claimed BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE characters ADD COLUMN IF NOT EXISTS daily_npc_material_date VARCHAR(10)",
+            "ALTER TABLE characters ADD COLUMN IF NOT EXISTS title_reward_date VARCHAR(10)",
             "ALTER TABLE npc_units ADD COLUMN IF NOT EXISTS upgrade_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE npc_units ADD COLUMN IF NOT EXISTS strength INTEGER NOT NULL DEFAULT 5",
+            "ALTER TABLE npc_units ADD COLUMN IF NOT EXISTS endurance INTEGER NOT NULL DEFAULT 5",
+            "ALTER TABLE npc_units ADD COLUMN IF NOT EXISTS agility INTEGER NOT NULL DEFAULT 5",
+            "ALTER TABLE npc_units ADD COLUMN IF NOT EXISTS skill INTEGER NOT NULL DEFAULT 5",
             "ALTER TABLE characters ALTER COLUMN faction SET DEFAULT 'Не назначена'",
             "ALTER TABLE characters ALTER COLUMN title SET DEFAULT 'Жители'",
             "UPDATE characters SET faction = 'ЗАПАДНАЯ ФРАКЦИЯ' WHERE faction IN ('Западная сторона', 'Западная фракция', 'ЗАПАДНАЯ СТОРОНА')",
             "UPDATE characters SET faction = 'НЕЙТРАЛЬНЫЙ ДИАЛОГ' WHERE faction IN ('Нейтральный Диалог', 'Нейтральный диалог')",
             "UPDATE characters SET faction = 'Не назначена' WHERE faction IS NULL OR faction IN ('Нет', '')",
             "UPDATE characters SET title = 'Жители' WHERE title IN ('Гражданин', 'Обычный житель', 'Житель')",
-            "UPDATE characters SET title = 'Жители' WHERE title LIKE 'Лидер фракции %'",
-            "UPDATE characters SET title = 'Жители' WHERE title NOT IN ('Король', 'Королева', 'Хорги', 'Чародей', 'Жители')",
+            "UPDATE characters SET title = 'Лидер фракции' WHERE title LIKE 'Лидер фракции %'",
+            "UPDATE characters SET title = 'Волшебник' WHERE title = 'Маг'",
+            "UPDATE characters SET title = 'Жители' WHERE title NOT IN ('Король', 'Королева', 'Лидер фракции', 'Хорги', 'Чародей', 'Волшебник', 'Жители')",
         ]
         for statement in upgrades:
             await connection.execute(text(statement))

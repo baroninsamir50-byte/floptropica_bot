@@ -93,9 +93,11 @@ def admin_roles_keyboard(tid: int) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="👑 Король", callback_data=f"settitle:{tid}:king"),
          InlineKeyboardButton(text="👑 Королева", callback_data=f"settitle:{tid}:queen")],
+        [InlineKeyboardButton(text="🚩 Лидер фракции", callback_data=f"settitle:{tid}:faction_leader")],
         [InlineKeyboardButton(text="✨ Хорги", callback_data=f"settitle:{tid}:horgi"),
          InlineKeyboardButton(text="🔮 Чародей", callback_data=f"settitle:{tid}:sorcerer")],
-        [InlineKeyboardButton(text="👥 Жители", callback_data=f"settitle:{tid}:residents")],
+        [InlineKeyboardButton(text="🪄 Волшебник", callback_data=f"settitle:{tid}:wizard"),
+         InlineKeyboardButton(text="👥 Жители", callback_data=f"settitle:{tid}:residents")],
         [InlineKeyboardButton(text=f"🌅 {WESTERN_FACTION}", callback_data=f"setfaction:{tid}:west")],
         [InlineKeyboardButton(text=f"🕊 {NEUTRAL_DIALOGUE}", callback_data=f"setfaction:{tid}:neutral")],
         [InlineKeyboardButton(text="🚩 Без фракции", callback_data=f"setfaction:{tid}:none")],

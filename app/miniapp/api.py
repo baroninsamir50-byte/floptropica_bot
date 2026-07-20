@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.database import SessionFactory
 from app.models import (
     InventoryItem, ItemTemplate, OwnedNpc, Duel, Character, User,
-    SystemMedia, TarotCard, TarotReading, House, HouseAttack, HouseRoom, NpcUnit,
+    SystemMedia, TarotCard, TarotReading, House, HouseAttack, HouseRoom, NpcUnit, PlayerStory,
 )
 from app.miniapp.auth import TelegramMiniAppUser, current_miniapp_user
 from app.services import (
@@ -24,9 +24,9 @@ from app.services import (
     level_income_multiplier, level_rank, set_system_media, change_gold, apply_levels,
     get_effective_stats, household_members, GUARD_UPGRADE_ITEMS,
     FARMER_UPGRADE_ITEMS, NPC_UPGRADE_ITEMS, WORK_REWARD_MULTIPLIER,
-    guard_model_variant,
+    guard_model_variant, npc_model_variant, npc_upgrade_plan, npc_stat_gains, npc_power,
 )
-from app.work_catalog import available_professions, profession_by_key, title_can_use
+from app.work_catalog import available_professions, profession_by_key, title_can_use, profession_income_multiplier
 from app.miniapp.duel_engine import STYLES, initialize_duel, perform_action, log_list
 from app.tarot_service import create_daily_reading, offered_cards
 from app.factions import (
@@ -106,6 +106,8 @@ class ItemRequest(BaseModel):
     item_id: int
 class InventoryRequest(BaseModel):
     inventory_id: int
+class UseInventoryRequest(BaseModel):
+    inventory_id: int
 class DuelChallengeRequest(BaseModel):
     opponent_id: int
     style: str = "guardian"
@@ -137,6 +139,9 @@ async def telegram_file_response(file_id: str) -> Response:
 async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
     c = await require_character(user, session)
     c.faction = normalize_faction(c.faction)
+    if c.work_count_date != local_date():
+        c.work_count_date = local_date()
+        c.work_count = 0
     c.user.last_seen_at = datetime.now(timezone.utc)
     household, household_ids, household_houses, shared_house = await household_context(session, c)
     spouse = next((member for member in household if member.id != c.id), None)
@@ -148,7 +153,7 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
         .where(InventoryItem.character_id==c.id).order_by(ItemTemplate.name)
     )
     inventory=[{
-        "inventory_id":inv.id,"item_id":item.id,"name":item.name,"description":item.description,
+        "inventory_id":inv.id,"item_id":item.id,"slug":item.slug,"name":item.name,"description":item.description,
         "quantity":inv.quantity,"equipped":inv.equipped,"slot":item.slot,"rarity":item.rarity,
         "stat_name":item.stat_name,"stat_bonus":item.stat_bonus,
     } for inv,item in inv_result.all()]
@@ -180,8 +185,8 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
         "image_available": bool(shared_house and shared_house.image_file_id)},
         "work":{"count":c.work_count,"active":bool(c.work_ends_at and not c.work_reward_claimed),"remaining_seconds":remaining},
         "professions":[{"key":k,"name":str(d["name"]),"label":str(d["label"]),
-            "gold":[max(1, int(d["gold"][0] * level_income_multiplier(c.level) * WORK_REWARD_MULTIPLIER)), max(1, int(d["gold"][1] * level_income_multiplier(c.level) * WORK_REWARD_MULTIPLIER))],
-            "xp":list(d["xp"])} for k,d in available_professions(c.title)],
+            "gold":[max(1, int(d["gold"][0] * level_income_multiplier(c.level) * WORK_REWARD_MULTIPLIER * profession_income_multiplier(c.title, d))), max(1, int(d["gold"][1] * level_income_multiplier(c.level) * WORK_REWARD_MULTIPLIER * profession_income_multiplier(c.title, d)))],
+            "xp":list(d["xp"]), "role_bonus": round(profession_income_multiplier(c.title, d)-1.0, 2)} for k,d in available_professions(c.title)],
         "shop":{"date":local_date(),"items":[{"id":i.id,"name":i.name,"description":i.description,"price":i.price,
             "slot":i.slot,"rarity":i.rarity,"stat_name":i.stat_name,"stat_bonus":i.stat_bonus} for i in shop]},
         "inventory":inventory,"npcs":npcs,"media":media,
@@ -216,7 +221,7 @@ async def work_start(user=Depends(current_miniapp_user),session:AsyncSession=Dep
 async def work_claim(user=Depends(current_miniapp_user),session:AsyncSession=Depends(get_session)):
     c=await require_character(user,session)
     try:
-        gold,xp=await claim_work(session,c); return {"ok":True,"gold":gold,"xp":xp}
+        gold,xp,title_reward=await claim_work(session,c); return {"ok":True,"gold":gold,"xp":xp,"title_reward":title_reward}
     except ValueError as e: raise HTTPException(400,str(e))
 
 @router.post("/shop/buy")
@@ -632,6 +637,29 @@ async def duel_center(user=Depends(current_miniapp_user), session:AsyncSession=D
         "outgoing": outgoing,
         "history": history,
     }
+
+@router.post("/inventory/use")
+async def use_inventory_item(payload: UseInventoryRequest, user=Depends(current_miniapp_user), session:AsyncSession=Depends(get_session)):
+    character = await require_character(user, session)
+    result = await session.execute(
+        select(InventoryItem, ItemTemplate)
+        .join(ItemTemplate, ItemTemplate.id == InventoryItem.item_id)
+        .where(InventoryItem.id == payload.inventory_id, InventoryItem.character_id == character.id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(404, "Предмет не найден.")
+    inventory_item, item = row
+    if item.slug not in {"healing_potion", "greater_healing_potion"}:
+        raise HTTPException(400, "Этот предмет нельзя использовать таким способом.")
+    restored = int(item.stat_bonus or 10)
+    character.health += restored
+    if inventory_item.quantity <= 1:
+        await session.delete(inventory_item)
+    else:
+        inventory_item.quantity -= 1
+    return {"ok": True, "message": f"{item.name} использовано: здоровье героя увеличено на {restored}.", "health": character.health}
+
 
 @router.post("/duels/challenge")
 async def duel_challenge(payload:DuelChallengeRequest,user=Depends(current_miniapp_user),session:AsyncSession=Depends(get_session)):
@@ -1131,10 +1159,18 @@ async def npc_payload(
         "farmer_upgrade_hat": "Соломенная шляпа",
         "farmer_upgrade_book": "Книга агронома",
     }
-    upgrade_cost = 25 + npc.upgrade_count * 15
-    model_variant = guard_model_variant(npc.level) if npc.npc_type == "guard" else npc.model_variant
-    if npc.npc_type == "guard" and npc.model_variant != model_variant:
+    plan = npc_upgrade_plan(npc.level)
+    upgrade_cost = int(plan["cost"])
+    requires_kit = bool(plan["requires_kit"])
+    model_variant = npc_model_variant(npc.level)
+    if npc.model_variant != model_variant:
         npc.model_variant = model_variant
+    stats = {
+        "strength": npc.strength,
+        "endurance": npc.endurance,
+        "agility": npc.agility,
+        "skill": npc.skill,
+    }
     return {
         "id": npc.id,
         "type": npc.npc_type,
@@ -1145,12 +1181,18 @@ async def npc_payload(
         "level": npc.level,
         "upgrade_count": npc.upgrade_count,
         "upgrade_cost": upgrade_cost,
-        "upgrade_ready": all(slug in collected_slugs for slug in required),
+        "upgrade_stage": plan["stage"],
+        "requires_kit": requires_kit,
+        "max_level": bool(plan["max_level"]),
+        "next_level": min(npc.level + 1, 50),
+        "upgrade_ready": (not requires_kit) or all(slug in collected_slugs for slug in required),
         "upgrade_materials": [
             {"slug": slug, "name": material_names[slug], "owned": slug in collected_slugs}
             for slug in required
         ],
         "experience": npc.experience,
+        "stats": stats,
+        "power": npc_power(npc),
         "fatigue": npc.fatigue,
         "status": npc.status,
         "assignment": npc.assignment,
@@ -1158,10 +1200,8 @@ async def npc_payload(
         "alive": npc.alive,
         "model_url": f"/api/miniapp/media/{npc.npc_type}_model_{model_variant}"
             if npc.npc_type in {"guard", "peasant"} else None,
-        "appearance_rule": (
-            "Фото 1: уровни 1–19 · Фото 2: уровни 20–29 · Фото 3: уровень 30+"
-            if npc.npc_type == "guard" else None
-        ),
+        "appearance_rule": "Фото 1: уровни 1–19 · Фото 2: уровни 20–29 · Фото 3: уровни 30–50",
+        "progression_rule": "1–19: 3 🪙 за уровень · возвышение на 20-м: комплект · 20–29: 8 🪙 · возвышение на 30-м: комплект · 30–50: 15 🪙",
     }
 
 
@@ -1219,6 +1259,14 @@ async def estate_center(
 
     spouse = next((member for member in members if member.id != character.id), None)
     room_limit = sum(unlocked_room_count(member.level) for member in members)
+    repair_potions = await session.scalar(
+        select(func.coalesce(func.sum(InventoryItem.quantity), 0))
+        .join(ItemTemplate, ItemTemplate.id == InventoryItem.item_id)
+        .where(
+            InventoryItem.character_id.in_(member_ids),
+            ItemTemplate.slug == "house_repair_potion",
+        )
+    )
     return {
         "house": {
             "id": house.id,
@@ -1243,6 +1291,7 @@ async def estate_center(
             "image_url": f"/api/miniapp/estate/rooms/{room.id}/image" if room.image_file_id else None,
         } for room in rooms],
         "attack": attack_data,
+        "repair_potions": int(repair_potions or 0),
     }
 
 
@@ -1605,27 +1654,38 @@ async def upgrade_npc_unit(
     npc = await session.get(NpcUnit, payload.npc_id)
     if not npc or npc.character_id not in member_ids or not npc.alive:
         raise HTTPException(404, "NPC не найден.")
+    plan = npc_upgrade_plan(npc.level)
+    if plan["max_level"]:
+        raise HTTPException(400, "NPC уже достиг максимального 50-го уровня.")
     collected = await household_materials(session, member_ids)
     required = npc_upgrade_requirements(npc.npc_type)
-    missing = [slug for slug in required if slug not in collected]
-    if missing:
-        raise HTTPException(400, "Сначала соберите полный комплект из 5 предметов в Магазине дня.")
-    cost = 25 + npc.upgrade_count * 15
-    try:
-        await change_gold(session, character, -cost, f"npc_upgrade:{npc.npc_type}:{npc.id}")
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    await consume_household_upgrade_materials(session, member_ids, required)
+    if plan["requires_kit"]:
+        missing = [slug for slug in required if slug not in collected]
+        if missing:
+            raise HTTPException(400, "Для возвышения соберите полный комплект из 5 предметов в Магазине дня.")
+    cost = int(plan["cost"])
+    if cost:
+        try:
+            await change_gold(session, character, -cost, f"npc_upgrade:{npc.npc_type}:{npc.id}")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+    if plan["requires_kit"]:
+        await consume_household_upgrade_materials(session, member_ids, required)
+    ascension = bool(plan["requires_kit"])
+    gains = npc_stat_gains(npc.npc_type, ascension=ascension)
+    for stat, amount in gains.items():
+        setattr(npc, stat, getattr(npc, stat) + amount)
     npc.upgrade_count += 1
     npc.level += 1
-    if npc.npc_type == "guard":
-        npc.model_variant = guard_model_variant(npc.level)
-    npc.fatigue = max(0, npc.fatigue - 10)
+    npc.model_variant = npc_model_variant(npc.level)
+    npc.fatigue = max(0, npc.fatigue - (20 if ascension else 5))
     remaining_materials = await household_materials(session, member_ids)
     owner_name = next((member.name for member in members if member.id == npc.character_id), None)
+    cost_text = f" за {cost} монет" if cost else ""
+    material_text = " Комплект предметов использован, облик изменён." if ascension else ""
     return {
         "ok": True,
-        "message": f"{npc.name} улучшен до уровня {npc.level} за {cost} монет. Комплект предметов использован.",
+        "message": f"{npc.name} улучшен до уровня {npc.level}{cost_text}.{material_text}",
         "unit": await npc_payload(npc, remaining_materials, owner_name),
         "gold": character.gold,
     }
@@ -1653,8 +1713,9 @@ async def npc_action(
         if npc.status == "resting":
             npc.fatigue = max(0, npc.fatigue - 70)
         elif npc.status == "training":
-            npc.level += 1
-            npc.experience = 0
+            npc.experience += 20
+            npc.skill += 2
+            npc.endurance += 1
         npc.status = "idle"
         npc.assignment = None
         npc.available_at = None
@@ -1699,7 +1760,7 @@ async def npc_action(
     npc.experience += 6 + npc.level
 
     if action == "field":
-        reward = randint(4, 8) + npc.level * 2 + npc.upgrade_count * 2
+        reward = randint(4, 8) + npc.level + npc.skill * 2 + npc.endurance // 2
         await change_gold(session, character, reward, "farmer_field")
         message = f"{label}: получено {reward} золота в общий бюджет."
     elif action == "clean":
@@ -1709,10 +1770,10 @@ async def npc_action(
         message = "Совместное владение убрано."
     elif action == "garden":
         if house:
-            house.repair_energy += 3 + npc.level + npc.upgrade_count
+            house.repair_energy += 3 + npc.level + npc.skill + npc.endurance // 2
         message = "Сад полит, получена энергия ремонта."
     else:
-        character.experience += 4 + npc.upgrade_count
+        character.experience += 4 + npc.skill // 2
         apply_levels(character)
         message = "Туалеты очищены. Получен опыт."
 
@@ -1746,6 +1807,39 @@ async def repair_estate(
     return {"ok": True, "cost": cost, "restored": restored, "integrity": house.integrity, "gold": character.gold}
 
 
+@router.post("/estate/repair-potion")
+async def repair_estate_with_potion(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, member_ids, _, house = await household_context(session, character)
+    if not house:
+        raise HTTPException(404, "Владение не найдено.")
+    if house.integrity >= 100:
+        raise HTTPException(400, "Владение уже полностью восстановлено.")
+    result = await session.execute(
+        select(InventoryItem)
+        .join(ItemTemplate, ItemTemplate.id == InventoryItem.item_id)
+        .where(
+            InventoryItem.character_id.in_(member_ids),
+            ItemTemplate.slug == "house_repair_potion",
+            InventoryItem.quantity > 0,
+        )
+        .order_by(InventoryItem.id)
+    )
+    potion = result.scalars().first()
+    if not potion:
+        raise HTTPException(400, "Зелья ремонта дома нет в общем инвентаре.")
+    if potion.quantity <= 1:
+        await session.delete(potion)
+    else:
+        potion.quantity -= 1
+    restored = 100 - house.integrity
+    house.integrity = 100
+    return {"ok": True, "restored": restored, "integrity": 100, "message": "Зелье полностью восстановило владение без монет."}
+
+
 async def registered_players_payload(session: AsyncSession, me: Character) -> list[dict]:
     result = await session.execute(
         select(Character, User)
@@ -1757,6 +1851,8 @@ async def registered_players_payload(session: AsyncSession, me: Character) -> li
     houses_result = await session.execute(select(House).order_by(House.owner_id))
     houses_by_owner = {house.owner_id: house for house in houses_result.scalars()}
     rooms_result = await session.execute(select(HouseRoom).order_by(HouseRoom.id))
+    stories_result = await session.execute(select(PlayerStory).where(PlayerStory.is_published.is_(True)))
+    stories_by_character = {story.character_id: story for story in stories_result.scalars()}
     rooms_by_house: dict[int, list[HouseRoom]] = {}
     for room in rooms_result.scalars():
         rooms_by_house.setdefault(room.house_id, []).append(room)
@@ -1787,6 +1883,7 @@ async def registered_players_payload(session: AsyncSession, me: Character) -> li
             "social_status": character.social_status,
             "reputation": character.reputation,
             "portrait_available": bool(character.portrait_file_id),
+            "story_available": character.id in stories_by_character,
             "spouse": ({"id": spouse.id, "name": spouse.name} if spouse else None),
             "house": ({
                 "id": house.id,
@@ -1815,6 +1912,54 @@ async def friends_list(user=Depends(current_miniapp_user), session: AsyncSession
     me = await require_character(user, session)
     players = await registered_players_payload(session, me)
     return {"players": players, "count": len(players)}
+
+
+@router.get("/friends/{character_id}/story")
+async def friend_story(character_id: int, user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_character(user, session)
+    character = await session.get(Character, character_id)
+    story = await session.scalar(
+        select(PlayerStory).where(
+            PlayerStory.character_id == character_id,
+            PlayerStory.is_published.is_(True),
+        )
+    )
+    if not character or not story:
+        raise HTTPException(404, "История игрока ещё не опубликована.")
+    parts = [
+        ("introduction", "Введение", story.introduction, story.introduction_image_file_id),
+        ("main_part_one", "Основная часть 1", story.main_part_one, story.main_part_one_image_file_id),
+        ("main_part_two", "Основная часть 2", story.main_part_two, story.main_part_two_image_file_id),
+        ("ending", "Конец", story.ending, story.ending_image_file_id),
+    ]
+    return {
+        "character": {"id": character.id, "name": character.name, "title": character.title, "level": character.level},
+        "parts": [{
+            "key": key, "label": label, "text": text,
+            "image_available": bool(image_file_id),
+            "image_url": f"/api/miniapp/friends/{character.id}/story/{key}/image" if image_file_id else None,
+        } for key, label, text, image_file_id in parts],
+    }
+
+
+@router.get("/friends/{character_id}/story/{part}/image")
+async def friend_story_image(character_id: int, part: str, user=Depends(current_miniapp_user), session: AsyncSession=Depends(get_session)):
+    await require_character(user, session)
+    story = await session.scalar(
+        select(PlayerStory).where(PlayerStory.character_id == character_id, PlayerStory.is_published.is_(True))
+    )
+    if not story:
+        raise HTTPException(404, "История не найдена.")
+    fields = {
+        "introduction": story.introduction_image_file_id,
+        "main_part_one": story.main_part_one_image_file_id,
+        "main_part_two": story.main_part_two_image_file_id,
+        "ending": story.ending_image_file_id,
+    }
+    file_id = fields.get(part)
+    if not file_id:
+        raise HTTPException(404, "Изображение этой части не загружено.")
+    return await telegram_file_response(file_id)
 
 
 @router.get("/friends/{character_id}/portrait")

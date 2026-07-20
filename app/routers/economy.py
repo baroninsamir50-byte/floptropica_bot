@@ -23,7 +23,7 @@ async def show_work(message: Message, session: AsyncSession, telegram_id: int) -
         return
     try:
         text = await start_work(c, c.profession)
-        await message.answer(f"💼 {text}\nНаграда: 1–5 золота и 5–10 XP.")
+        await message.answer(f"💼 {text}\nРазмер награды зависит от профессии, уровня и титула.")
     except ValueError as exc:
         await message.answer(str(exc))
 
@@ -46,16 +46,16 @@ async def work_status(message: Message, session: AsyncSession) -> None:
         await message.answer("Сначала зарегистрируйтесь: /start")
         return
     try:
-        gold, xp = await claim_work(session, c)
-        await message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP.")
+        gold, xp, title_reward = await claim_work(session, c)
+        await message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP." + (f"\n🎁 Титульная награда: {title_reward}." if title_reward else ""))
     except ValueError as exc:
         await message.answer(str(exc))
 
 
 async def show_shop(message: Message, session: AsyncSession) -> None:
-    items = await get_daily_shop_items(session, 5)
+    items = await get_daily_shop_items(session, 6)
     rows = [(item.id, item.name, item.price) for item in items]
-    lines = ["🛒 <b>Королевский магазин</b>", f"📅 Ассортимент на {local_date()}", "", "Сегодня доступны 5 товаров:"]
+    lines = ["🛒 <b>Королевский магазин</b>", f"📅 Ассортимент на {local_date()}", "", "Сегодня доступны 6 товаров:"]
     for item in items:
         lines.append(f"• <b>{item.name}</b> — {item.price} 🪙\n  {item.rarity}. {item.description}")
     lines.append("\nАссортимент сменится на следующие сутки.")
@@ -190,8 +190,8 @@ async def treasury_claim(callback: CallbackQuery, session: AsyncSession) -> None
         await callback.message.answer("Сначала зарегистрируйтесь: /start")
         return
     try:
-        gold, xp = await claim_work(session, c)
-        await callback.message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP.")
+        gold, xp, title_reward = await claim_work(session, c)
+        await callback.message.answer(f"✅ Работа завершена. Получено {gold} золота и {xp} XP." + (f"\n🎁 Титульная награда: {title_reward}." if title_reward else ""))
     except ValueError as exc:
         await callback.message.answer(str(exc))
 

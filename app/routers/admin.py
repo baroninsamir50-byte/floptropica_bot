@@ -33,8 +33,10 @@ router = Router()
 TITLE_DATA = {
     "king": "Король",
     "queen": "Королева",
+    "faction_leader": "Лидер фракции",
     "horgi": "Хорги",
     "sorcerer": "Чародей",
+    "wizard": "Волшебник",
     "residents": "Жители",
 }
 
