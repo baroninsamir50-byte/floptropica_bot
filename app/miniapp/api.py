@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.database import SessionFactory
 from app.models import (
     InventoryItem, ItemTemplate, OwnedNpc, Duel, Character, User,
-    SystemMedia, TarotCard, TarotReading, House, HouseAttack, HouseRoom, NpcUnit, PlayerStory,
+    SystemMedia, TarotCard, TarotReading, House, HouseAttack, HouseRoom, NpcUnit, PlayerStory, StoryRead,
 )
 from app.miniapp.auth import TelegramMiniAppUser, current_miniapp_user
 from app.services import (
@@ -1200,8 +1200,6 @@ async def npc_payload(
         "alive": npc.alive,
         "model_url": f"/api/miniapp/media/{npc.npc_type}_model_{model_variant}"
             if npc.npc_type in {"guard", "peasant"} else None,
-        "appearance_rule": "Фото 1: уровни 1–19 · Фото 2: уровни 20–29 · Фото 3: уровни 30–50",
-        "progression_rule": "1–19: 3 🪙 за уровень · возвышение на 20-м: комплект · 20–29: 8 🪙 · возвышение на 30-м: комплект · 30–50: 15 🪙",
     }
 
 
@@ -1579,7 +1577,6 @@ async def npc_center(
         "rules": {
             "guard_time": "Улучшенный стражник сильнее защищает совместный дом.",
             "fatigue": "При усталости 100 фермер нуждается в отдыхе. Без отдыха он может погибнуть.",
-            "school": "Для каждого улучшения нужен новый комплект из 5 предметов. После улучшения предметы списываются. Первое стоит 25 монет, каждое следующее на 15 дороже.",
         },
     }
 
@@ -1939,6 +1936,66 @@ async def friend_story(character_id: int, user=Depends(current_miniapp_user), se
             "image_available": bool(image_file_id),
             "image_url": f"/api/miniapp/friends/{character.id}/story/{key}/image" if image_file_id else None,
         } for key, label, text, image_file_id in parts],
+    }
+
+
+@router.post("/friends/{character_id}/story/complete")
+async def complete_friend_story(
+    character_id: int,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    reader = await require_character(user, session)
+    if character_id == reader.id:
+        return {
+            "ok": True,
+            "counted": False,
+            "achievement_unlocked": False,
+            "reward": 0,
+            "message": "Собственная история не учитывается для секретной ачивки.",
+        }
+
+    story = await session.scalar(
+        select(PlayerStory).where(
+            PlayerStory.character_id == character_id,
+            PlayerStory.is_published.is_(True),
+        )
+    )
+    if not story:
+        raise HTTPException(404, "История игрока ещё не опубликована.")
+
+    existing = await session.scalar(
+        select(StoryRead).where(
+            StoryRead.reader_character_id == reader.id,
+            StoryRead.story_character_id == character_id,
+        )
+    )
+    counted = existing is None
+    if counted:
+        session.add(StoryRead(
+            reader_character_id=reader.id,
+            story_character_id=character_id,
+        ))
+        await session.flush()
+
+    completed_count = int(await session.scalar(
+        select(func.count(StoryRead.id)).where(StoryRead.reader_character_id == reader.id)
+    ) or 0)
+
+    achievement_unlocked = False
+    reward = 0
+    if completed_count >= 6 and not reader.story_reader_achievement_claimed:
+        reader.story_reader_achievement_claimed = True
+        reward = 20
+        await change_gold(session, reader, reward, "achievement:secret_story_reader")
+        achievement_unlocked = True
+
+    return {
+        "ok": True,
+        "counted": counted,
+        "achievement_unlocked": achievement_unlocked,
+        "reward": reward,
+        "gold": reader.gold,
     }
 
 

@@ -1940,3 +1940,24 @@ html,body,#app,.content{max-width:100%;overflow-x:hidden}*{box-sizing:border-box
 .visual-novel-scene{overflow:hidden;border:1px solid rgba(245,204,107,.28);border-radius:24px;background:#0b0712;box-shadow:0 18px 45px rgba(0,0,0,.3)}.novel-image{position:relative;min-height:430px;aspect-ratio:4/5;overflow:hidden;background:radial-gradient(circle at 50% 35%,#322448,#0d0916 72%)}.novel-image img{width:100%;height:100%;object-fit:cover}.novel-progress{position:absolute;top:12px;right:12px;padding:6px 9px;border:1px solid rgba(255,255,255,.15);border-radius:999px;background:rgba(8,5,14,.75);font-size:10px;font-weight:900}.novel-dialogue{position:relative;margin:-72px 12px 12px;padding:16px;border:1px solid rgba(245,204,107,.25);border-radius:18px;background:rgba(15,9,24,.94);backdrop-filter:blur(14px)}.novel-speaker{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}.novel-speaker span{color:#f5cc6b;font-weight:900}.novel-speaker small{color:var(--muted);font-size:9px;text-transform:uppercase}.novel-dialogue p{margin:0;font-size:13px;line-height:1.62}.novel-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
 @media(max-width:390px){.novel-image{min-height:380px}.novel-dialogue{margin-top:-58px;padding:13px}.npc-stats-grid{grid-template-columns:1fr 1fr}}
 .title-work-benefits{margin-bottom:12px;border-color:rgba(126,220,166,.24)}.title-work-benefits p{margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
+
+
+/* v7.7.6 — compact NPC cards, ascension-only kits and live work timer */
+.work-status{display:inline-flex;align-items:center;gap:5px}.work-status b{color:var(--gold);font-variant-numeric:tabular-nums}
+.compact-npc-card{grid-template-columns:112px minmax(0,1fr);min-height:0}
+.compact-npc-card .npc-model{min-height:188px}
+.compact-npc-card .npc-copy{padding:10px}
+.compact-npc-card .npc-title-row{align-items:flex-start}.compact-npc-card .npc-title-row h3{font-size:14px}
+.compact-npc-card .npc-owner,.compact-npc-card .npc-status{margin:4px 0;font-size:9px}
+.compact-npc-card .npc-power-line{margin:5px 0;padding:5px 7px}
+.npc-stats-grid.compact{gap:4px;margin-bottom:6px}.npc-stats-grid.compact span{padding:5px 6px;font-size:8px}.npc-stats-grid.compact b{font-size:12px}
+.npc-fatigue-compact{display:flex;justify-content:space-between;gap:8px;font-size:10px}.bar.fatigue.compact{height:6px;margin:4px 0 5px}
+.npc-quick-upgrade{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-top:7px;padding:7px;border:1px solid var(--line);border-radius:12px;background:rgba(10,7,17,.5)}
+.npc-quick-upgrade span{font-size:9px}.npc-quick-upgrade .btn{flex:0 0 auto;padding:8px 9px;font-size:9px}
+.npc-ascension-box{margin-top:7px;padding:8px}.npc-ascension-box>b{display:block;margin-bottom:7px;font-size:11px}.npc-ascension-box .btn{width:100%;margin-top:7px;padding:9px}
+.npc-material-list{display:grid;grid-template-columns:1fr;gap:4px}.npc-material{padding:5px 7px;font-size:9px}
+.npc-task-grid.compact-actions{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;margin-top:7px}.npc-task-grid.compact-actions button,.npc-task-grid.one-action button{padding:7px 4px;font-size:8px}
+.npc-task-grid.one-action{display:grid;grid-template-columns:1fr;margin-top:7px}
+@media(max-width:390px){.compact-npc-card{grid-template-columns:96px minmax(0,1fr)}.compact-npc-card .npc-model{min-height:168px}.npc-task-grid.compact-actions{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.npc-rules.compact-rules{display:grid;gap:4px;padding:9px 11px}.npc-rules.compact-rules p{margin:0;font-size:9px;line-height:1.35}

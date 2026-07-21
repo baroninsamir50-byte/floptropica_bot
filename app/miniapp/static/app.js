@@ -27,7 +27,8 @@ const state = {
   projectAdmins: null,
   duels: null,
   duelStyle: "guardian",
-  duelPoll: null
+  duelPoll: null,
+  workTimer: null
 };
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
@@ -72,6 +73,35 @@ async function api(path, options = {}) {
   return body;
 }
 
+
+function formatCountdown(totalSeconds) {
+  const seconds = Math.max(0, Number(totalSeconds) || 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return [hours, minutes, secs].map(value => String(value).padStart(2, "0")).join(":");
+}
+
+function startWorkCountdown() {
+  clearInterval(state.workTimer);
+  state.workTimer = null;
+  const timerNode = document.querySelector("[data-work-countdown]");
+  if (!timerNode || !state.data?.work?.active) return;
+  let remaining = Math.max(0, Number(state.data.work.remaining_seconds) || 0);
+  const update = () => {
+    timerNode.textContent = remaining > 0 ? formatCountdown(remaining) : "Смена завершена";
+    if (remaining <= 0) {
+      clearInterval(state.workTimer);
+      state.workTimer = null;
+      state.data.work.remaining_seconds = 0;
+      return;
+    }
+    remaining -= 1;
+    state.data.work.remaining_seconds = remaining;
+  };
+  update();
+  state.workTimer = setInterval(update, 1000);
+}
 
 async function protectedImage(path) {
   if (state.protectedImages.has(path)) {
@@ -549,7 +579,7 @@ function treasuryView() {
         <div class="compact-meta">
           <span>${d.hero.profession}</span>
           <span>${work.count}/6 смен</span>
-          <span>${work.active ? "Работа идёт" : "Свободен"}</span>
+          <span class="work-status">${work.active ? `Работа идёт · <b data-work-countdown>${formatCountdown(work.remaining_seconds)}</b>` : "Свободен"}</span>
         </div>
         <div class="action-grid">
           <button class="btn gold" onclick="startWork()">Начать смену</button>
@@ -1076,41 +1106,42 @@ function npcCard(npc){
   const stats=npc.stats||{};
   const upgradeContent = npc.max_level
     ? `<div class="npc-max-rank">🏆 Максимальный 50-й уровень</div>`
-    : `<div class="npc-upgrade-box">
-        <b>${npc.upgrade_stage} · ур. ${npc.level} → ${npc.next_level}</b>
-        <small class="muted">${npc.progression_rule}</small>
-        ${npc.requires_kit ? `<div class="npc-ascension-title">✨ Возвышение: нужен полный комплект</div><div class="npc-material-list">${materials}</div><small class="muted">Все 5 предметов исчезнут после возвышения.</small>` : `<div class="npc-level-price">Стоимость: <b>${npc.upgrade_cost} 🪙</b></div>`}
-        <button class="btn gold" onclick="upgradeNpc(${npc.id})" ${npc.upgrade_ready?'':'disabled'}>${npc.requires_kit?'✨ Возвысить NPC':'⬆ Повысить уровень'}</button>
-      </div>`;
-  return `<article class="npc-card ${dead?'dead':''}">
+    : npc.requires_kit
+      ? `<div class="npc-upgrade-box npc-ascension-box">
+          <b>✨ Возвышение до ${npc.next_level}-го уровня</b>
+          <div class="npc-material-list">${materials}</div>
+          <button class="btn gold" onclick="upgradeNpc(${npc.id})" ${npc.upgrade_ready?'':'disabled'}>Возвысить NPC</button>
+        </div>`
+      : `<div class="npc-quick-upgrade">
+          <span>Ур. ${npc.level} → ${npc.next_level} · <b>${npc.upgrade_cost} 🪙</b></span>
+          <button class="btn gold" onclick="upgradeNpc(${npc.id})">⬆ Улучшить</button>
+        </div>`;
+  return `<article class="npc-card compact-npc-card ${dead?'dead':''}">
     <div class="npc-model">
       <img src="${npc.model_url}" alt="${escapeHtml(npc.name)}" onerror="this.style.display='none'">
       <span>${npc.type==='guard'?'🛡':'🌾'}</span>
     </div>
     <div class="npc-copy">
-      <div class="row"><h3>${escapeHtml(npc.name)}</h3><span class="badge">Ур. ${npc.level}</span></div>
-      ${npc.owner_name ? `<small>Владелец: ${escapeHtml(npc.owner_name)}</small>` : ''}
-      <div class="npc-power-line">⚡ Общая сила: <b>${npc.power}</b></div>
-      <div class="npc-stats-grid">
+      <div class="row npc-title-row"><h3>${escapeHtml(npc.name)}</h3><span class="badge">Ур. ${npc.level}</span></div>
+      ${npc.owner_name ? `<small class="npc-owner">Владелец: ${escapeHtml(npc.owner_name)}</small>` : ''}
+      <div class="npc-power-line">⚡ Сила: <b>${npc.power}</b></div>
+      <div class="npc-stats-grid compact">
         <span>Сила <b>${stats.strength??0}</b></span><span>Выносливость <b>${stats.endurance??0}</b></span>
         <span>Ловкость <b>${stats.agility??0}</b></span><span>${npc.type==='guard'?'Защита':'Навык'} <b>${stats.skill??0}</b></span>
       </div>
-      <div class="stat-head"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
-      <div class="bar fatigue"><i style="width:${npc.fatigue}%"></i></div>
-      <small>${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
-      ${!dead ? upgradeContent : ''}
-      ${!dead?npc.type==='guard'?`
-        <div class="action-grid">
-          <button class="btn secondary" onclick="npcAction(${npc.id},'school')">🏫 Школа навыка</button>
-          <button class="btn gold" onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
-        </div>`:`
-        <div class="npc-task-grid">
+      <div class="npc-fatigue-compact"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
+      <div class="bar fatigue compact"><i style="width:${npc.fatigue}%"></i></div>
+      <small class="npc-status">${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
+      ${upgradeContent}
+      ${!dead ? (npc.type==='guard'
+        ? `<div class="npc-task-grid one-action"><button class="btn gold" onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button></div>`
+        : `<div class="npc-task-grid compact-actions">
           <button onclick="npcAction(${npc.id},'field')">🌾 Поле</button>
           <button onclick="npcAction(${npc.id},'clean')">🧹 Уборка</button>
           <button onclick="npcAction(${npc.id},'garden')">🌿 Сад</button>
           <button onclick="npcAction(${npc.id},'toilets')">🚽 Туалеты</button>
           <button onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
-        </div>`:''}
+        </div>`) : ''}
     </div>
   </article>`;
 }
@@ -1129,7 +1160,7 @@ function npcsView(){
       <button class="btn gold" onclick="buyNpc('guard')">🛡 Стражник · ${d.prices.guard} 🪙</button>
       <button class="btn gold" onclick="buyNpc('peasant')">🌾 Фермер · ${d.prices.peasant} 🪙</button>
     </div>
-    <div class="panel npc-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p><p>${d.rules.school}</p></div>
+    <div class="panel npc-rules compact-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p></div>
     <div class="npc-list">${d.units.map(npcCard).join("")||'<div class="panel muted">У вас пока нет NPC.</div>'}</div>
   `)
 }
@@ -1483,17 +1514,35 @@ function friendDetailView() {
 window.openFriendStory = async id => {
   try {
     state.selectedStory = await api(`/friends/${id}/story`);
+    state.selectedStory.completion_reported = false;
     state.storyIndex = 0;
+    if (state.selectedStory.parts.length === 1) reportStoryCompleted(state.selectedStory);
     state.view = "friend-story";
     reportPresence("friend-story");
     render();
   } catch (error) { toast(error.message); }
 };
 
+async function reportStoryCompleted(story) {
+  if (!story || story.completion_reported) return;
+  story.completion_reported = true;
+  try {
+    const result = await api(`/friends/${story.character.id}/story/complete`, {method: "POST"});
+    if (result.achievement_unlocked) {
+      await refresh();
+      state.view = "friend-story";
+      toast(`🏆 Секретная ачивка открыта: прочитано 6 историй! +${result.reward} монет`);
+    }
+  } catch (_) {
+    story.completion_reported = false;
+  }
+}
+
 window.changeStorySlide = direction => {
   if (!state.selectedStory) return;
   const max = state.selectedStory.parts.length - 1;
   state.storyIndex = Math.max(0, Math.min(max, state.storyIndex + direction));
+  if (state.storyIndex === max) reportStoryCompleted(state.selectedStory);
   render();
 };
 
@@ -1670,6 +1719,8 @@ function render() {
   }
   clearInterval(state.duelPoll);
   if(state.view==='games' && state.duels?.active){state.duelPoll=setInterval(()=>loadDuelCenter(true),3500);}
+  if(state.view==='treasury') startWorkCountdown();
+  else { clearInterval(state.workTimer); state.workTimer = null; }
 
   document.querySelectorAll(".bottom-nav button").forEach(button => {
     button.classList.toggle("active", button.dataset.view === state.view);

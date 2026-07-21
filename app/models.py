@@ -64,6 +64,7 @@ class Character(Base):
     summer_guard_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
     daily_npc_material_date: Mapped[str | None] = mapped_column(String(10))
     title_reward_date: Mapped[str | None] = mapped_column(String(10))
+    story_reader_achievement_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
     title: Mapped[str] = mapped_column(String(64), default="Жители")
     training_date: Mapped[str | None] = mapped_column(String(10))
     work_count_date: Mapped[str | None] = mapped_column(String(10))
@@ -325,6 +326,22 @@ class PlayerStory(Base):
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class StoryRead(Base):
+    __tablename__ = "story_reads"
+    __table_args__ = (
+        UniqueConstraint("reader_character_id", "story_character_id", name="uq_story_reader_author"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    reader_character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    story_character_id: Mapped[int] = mapped_column(
+        ForeignKey("characters.id", ondelete="CASCADE"), index=True
+    )
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class TarotCard(Base):
