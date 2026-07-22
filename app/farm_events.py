@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from random import sample
 
 
-FARM_PRICE = 70
+FARM_PRICE = 0
+FARMER_PRICE = 70
 FARM_START_PLOTS = 3
 FARM_BARN_CAPACITY = 30
 MARKET_COMMISSION = 0.05

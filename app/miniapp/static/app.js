@@ -91,10 +91,10 @@ function formatCountdown(totalSeconds) {
 
 const GAME_TUTORIALS = {
   farm: [
-    { icon: "🏚", title: "Постройте ферму", text: "Ферма стоит 70 монет. После строительства откроются три грядки и амбар для урожая." },
+    { icon: "🌾", title: "Ферма уже доступна", text: "Ферма открывается бесплатно вместе с владением. У вас сразу есть три грядки и амбар для урожая." },
     { icon: "🌱", title: "Посадите культуру", text: "Выберите пустую грядку, семена и нажмите «Посадить». Стоимость семян списывается сразу." },
     { icon: "💧", title: "Ухаживайте за посевами", text: "Без работника вы самостоятельно поливаете растения и собираете созревший урожай." },
-    { icon: "🌾", title: "Назначьте фермера", text: "Один крестьянин или фермер может автоматически обслуживать часть грядок, но получает усталость и голод." },
+    { icon: "🧑‍🌾", title: "Наймите первого фермера", text: "Первый фермер стоит 70 монет. До найма вы самостоятельно сажаете, поливаете и собираете урожай." },
     { icon: "🍲", title: "Кормите NPC", text: "Урожай из амбара можно отдавать стражникам и фермерам. Автокормление срабатывает при голоде 70." },
     { icon: "🛒", title: "Торгуйте урожаем", text: "Выставляйте продукты на торговой площади и назначайте цену для других игроков." }
   ],
@@ -1399,14 +1399,18 @@ function farmView(){
   const art=d.visual_assets||{};
   const farmBackground=state.data?.media?.farm_bg||art.kenney_scene||'';
   if(!d.built){
-    return section("🌾 Ферма",`<div class="farm-hero locked" style="background-image:linear-gradient(180deg,rgba(20,12,8,.08),rgba(14,8,18,.88)),url('${farmBackground}')"><div><div class="eyebrow">НОВАЯ ПОСТРОЙКА</div><h2>Средневековая ферма</h2><p>Три грядки, амбар и ручной уход. Назначенный фермер автоматически обслуживает две грядки.</p><button class="btn gold" onclick="buildFarm()">Построить за ${d.price} 🪙</button></div></div><div class="panel asset-note">Оформление: Kenney Isometric Miniature Farm, Medieval Tileset и Farm Assets OpenGameArt.</div>`);
+    return section("🌾 Ферма",`<div class="panel">Ферма подготавливается бесплатно…</div>`);
   }
   const f=d.farm;
   const farmerOptions=`<option value="">Обслуживать вручную</option>`+(d.farmers||[]).map(n=>`<option value="${n.id}" ${f.farmer_npc_id===n.id?'selected':''}>${escapeHtml(n.name)} · ур. ${n.level} · голод ${n.hunger}</option>`).join('');
+  const firstFarmerOffer=!(d.farmers||[]).length
+    ? `<div class="panel first-farmer-offer"><div><div class="eyebrow">ПОМОЩНИК ДЛЯ ФЕРМЫ</div><h3>Нанять первого фермера</h3><p>Стоимость — ${d.farmer_price||70} монет. До найма посадка, полив и сбор выполняются вручную.</p></div><button class="btn gold" onclick="buyFirstFarmWorker()">Нанять за ${d.farmer_price||70} 🪙</button></div>`
+    : '';
   const stock=(d.stock||[]).map(item=>`<article class="barn-item"><span>${item.crop.icon}</span><div><b>${item.crop.name}</b><small>${item.quantity} ед. · питание −${item.crop.hunger_restore}</small></div><div class="barn-actions"><button onclick="feedFromFarm('${item.crop_slug}')">🍲</button><button onclick="listFarmCrop('${item.crop_slug}',${item.quantity},${item.crop.base_price})">🪙</button></div></article>`).join('');
   const market=(d.market||[]).map(item=>`<article class="market-listing"><span>${item.crop.icon}</span><div><b>${item.crop.name} ×${item.quantity}</b><small>${item.seller_name} · ${item.unit_price} 🪙/шт.</small></div>${item.is_mine?'<span class="badge">Ваше</span>':`<button class="btn gold" onclick="buyFarmListing(${item.id})">${item.total_price} 🪙</button>`}</article>`).join('');
   return section("🌾 Ферма",`
     <div class="farm-hero" style="background-image:linear-gradient(180deg,rgba(25,14,8,.04),rgba(14,8,18,.82)),url('${farmBackground}')"><div><div class="eyebrow">ИЗОМЕТРИЧЕСКОЕ ВЛАДЕНИЕ</div><h2>Ферма · ур. ${f.level}</h2><p>Амбар ${f.barn_used}/${f.barn_capacity} · грядок ${f.plot_count}</p></div></div>
+    ${firstFarmerOffer}
     <div class="farm-toolbar panel" style="background-image:linear-gradient(90deg,rgba(20,12,24,.94),rgba(20,12,24,.88)),url('${art.medieval_tiles||mediaUrl('farm_bg')||''}')">
       <label>Назначенный фермер<select onchange="assignFarmWorker(this.value)">${farmerOptions}</select></label>
       <label class="toggle-line"><input type="checkbox" ${f.auto_feed?'checked':''} onchange="toggleFarmAutoFeed(this.checked)"> Автокормление при голоде 70</label>
@@ -1419,11 +1423,11 @@ function farmView(){
     <button class="btn secondary" onclick="go('house')">← Вернуться во владение</button>`);
 }
 
-window.buildFarm=async()=>{try{const r=await api('/farm/build',{method:'POST'});toast(r.message);await refresh();await loadFarm(true);render()}catch(e){toast(e.message)}};
 window.plantFarmCrop=async plotId=>{const crop_slug=$(`farm-crop-${plotId}`)?.value;try{const r=await api('/farm/plant',{method:'POST',body:JSON.stringify({plot_id:plotId,crop_slug})});toast(r.message);await refresh();await loadFarm(true);render()}catch(e){toast(e.message)}};
 window.waterFarmPlot=async plotId=>{try{const r=await api('/farm/water',{method:'POST',body:JSON.stringify({plot_id:plotId})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
 window.harvestFarmPlot=async plotId=>{try{const r=await api('/farm/harvest',{method:'POST',body:JSON.stringify({plot_id:plotId})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
 window.assignFarmWorker=async value=>{try{const r=await api('/farm/assign',{method:'POST',body:JSON.stringify({npc_id:value?Number(value):null})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.buyFirstFarmWorker=async()=>{try{const r=await api('/npcs/buy',{method:'POST',body:JSON.stringify({npc_type:'peasant'})});toast('Первый фермер нанят за 70 монет');await refresh();await Promise.all([loadFarm(true),loadNpcs(true)]);render()}catch(e){toast(e.message)}};
 window.toggleFarmAutoFeed=async enabled=>{try{const r=await api('/farm/auto-feed',{method:'POST',body:JSON.stringify({enabled})});toast(r.message);await loadFarm(true)}catch(e){toast(e.message)}};
 window.feedFromFarm=async crop_slug=>{const npcs=state.farm?.npcs||[];if(!npcs.length){toast('Нет живых NPC для кормления');return}const text=npcs.map(n=>`${n.id}: ${n.name} · голод ${n.hunger}`).join('\n');const value=prompt(`Кого накормить? Введите номер:\n${text}`,String(npcs[0].id));if(!value)return;try{const r=await api('/farm/feed',{method:'POST',body:JSON.stringify({npc_id:Number(value),crop_slug})});toast(r.message);await loadFarm(true);await loadNpcs(true);render()}catch(e){toast(e.message)}};
 window.listFarmCrop=async(crop_slug,maxQty,basePrice)=>{const quantity=Number(prompt(`Количество для продажи (1–${maxQty})`,'1'));if(!quantity)return;const unit_price=Number(prompt(`Цена за единицу (примерно ${Math.max(1,Math.ceil(basePrice/2))}–${basePrice*2})`,String(basePrice)));if(!unit_price)return;try{const r=await api('/farm/market/list',{method:'POST',body:JSON.stringify({crop_slug,quantity,unit_price})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};

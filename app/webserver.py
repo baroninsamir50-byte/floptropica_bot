@@ -68,4 +68,4 @@ async def run_tasks(key: str = Query(default="")) -> dict[str, str]:
 
 @app.get("/version")
 async def version():
-    return {"version":"7.7.7","work_shifts":6,"farm":True,"farm_price":70,"farm_start_plots":3,"npc_hunger":True,"safe_rest":True,"estate_events":20,"event_cycle_days":3,"player_market":True,"work_reward_multiplier":1.5,"title_income_bonuses":True,"title_potions":True,"npc_progression":"1-50 with ascension at 20 and 30","player_stories":True,"secret_story_achievement":True,"summer_guard_until":"2026-08-25"}
+    return {"version":"7.7.7","work_shifts":6,"farm":True,"farm_price":0,"first_farmer_price":70,"farm_start_plots":3,"npc_hunger":True,"safe_rest":True,"estate_events":20,"event_cycle_days":3,"player_market":True,"work_reward_multiplier":1.5,"title_income_bonuses":True,"title_potions":True,"npc_progression":"1-50 with ascension at 20 and 30","player_stories":True,"secret_story_achievement":True,"summer_guard_until":"2026-08-25"}

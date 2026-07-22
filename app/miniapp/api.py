@@ -32,7 +32,7 @@ from app.work_catalog import available_professions, profession_by_key, title_can
 from app.miniapp.duel_engine import STYLES, initialize_duel, perform_action, log_list
 from app.tarot_service import create_daily_reading, offered_cards
 from app.farm_events import (
-    CROPS, FARM_PRICE, FARM_START_PLOTS, FARM_BARN_CAPACITY, MARKET_COMMISSION,
+    CROPS, FARM_PRICE, FARMER_PRICE, FARM_START_PLOTS, FARM_BARN_CAPACITY, MARKET_COMMISSION,
     ESTATE_EVENTS, EVENT_BY_ID, CATEGORY_LABELS, json_list, json_dict,
     event_options, event_payload,
 )
@@ -1351,6 +1351,26 @@ async def farm_for_house(session: AsyncSession, house_id: int) -> Farm | None:
     return await session.scalar(select(Farm).where(Farm.house_id == house_id))
 
 
+async def ensure_free_farm(session: AsyncSession, house_id: int) -> Farm:
+    """Возвращает ферму владения, бесплатно создавая стартовые 3 грядки."""
+    farm = await farm_for_house(session, house_id)
+    if farm:
+        return farm
+    farm = Farm(
+        house_id=house_id,
+        level=1,
+        plot_count=FARM_START_PLOTS,
+        barn_capacity=FARM_BARN_CAPACITY,
+        auto_feed=True,
+    )
+    session.add(farm)
+    await session.flush()
+    for slot in range(1, FARM_START_PLOTS + 1):
+        session.add(FarmPlot(farm_id=farm.id, slot=slot))
+    await session.flush()
+    return farm
+
+
 async def stock_rows(session: AsyncSession, farm_id: int) -> list[FarmStock]:
     result = await session.execute(
         select(FarmStock).where(FarmStock.farm_id == farm_id).order_by(FarmStock.crop_slug)
@@ -1549,6 +1569,7 @@ async def farm_payload(
     return {
         "built": True,
         "price": FARM_PRICE,
+        "farmer_price": FARMER_PRICE,
         "farm": {
             "id": farm.id, "level": farm.level, "plot_count": farm.plot_count,
             "barn_capacity": farm.barn_capacity, "barn_used": sum(row.quantity for row in stocks),
@@ -1594,19 +1615,9 @@ async def farm_center(
     members, member_ids, _, house = await household_context(session, character)
     if not house:
         raise HTTPException(404, "Сначала создайте владение.")
-    farm = await farm_for_house(session, house.id)
-    if not farm:
-        return {
-            "built": False, "price": FARM_PRICE, "plots": [], "stock": [],
-            "tutorial_required": not character.farm_tutorial_completed,
-            "crops": [{**data, "slug": slug} for slug, data in CROPS.items()],
-            "visual_assets": {
-                "kenney_scene": "https://opengameart.org/sites/default/files/styles/medium/public/sample_95.png",
-                "kenney_preview": "https://opengameart.org/sites/default/files/styles/medium/public/preview_1116.png",
-                "medieval_tiles": "https://opengameart.org/sites/default/files/medieval%20tileset%20exterior.png",
-                "farm_props": "https://lpc.opengameart.org/sites/default/files/styles/medium/public/tileset_preview.png",
-            },
-        }
+    # Ферма является бесплатной частью владения. При первом входе создаём
+    # стартовые три грядки и амбар без списания монет.
+    farm = await ensure_free_farm(session, house.id)
     payload = await farm_payload(session, farm, member_ids, members)
     payload["tutorial_required"] = not character.farm_tutorial_completed
     listings_result = await session.execute(
@@ -1631,25 +1642,17 @@ async def build_farm(
     user=Depends(current_miniapp_user),
     session: AsyncSession=Depends(get_session),
 ):
+    """Совместимость со старым интерфейсом: ферма открывается бесплатно."""
     character = await require_character(user, session)
     _, _, _, house = await household_context(session, character)
     if not house:
         raise HTTPException(404, "Сначала создайте владение.")
-    if await farm_for_house(session, house.id):
-        raise HTTPException(400, "Ферма уже построена.")
-    try:
-        await change_gold(session, character, -FARM_PRICE, "build_farm")
-    except ValueError as exc:
-        raise HTTPException(400, str(exc))
-    farm = Farm(
-        house_id=house.id, level=1, plot_count=FARM_START_PLOTS,
-        barn_capacity=FARM_BARN_CAPACITY, auto_feed=True,
-    )
-    session.add(farm)
-    await session.flush()
-    for slot in range(1, FARM_START_PLOTS + 1):
-        session.add(FarmPlot(farm_id=farm.id, slot=slot))
-    return {"ok": True, "message": "Ферма построена. Открыто 3 грядки.", "gold": character.gold}
+    await ensure_free_farm(session, house.id)
+    return {
+        "ok": True,
+        "message": "Ферма открыта бесплатно. Доступны 3 грядки; до найма фермера вы ухаживаете за ними сами.",
+        "gold": character.gold,
+    }
 
 
 @router.post("/farm/plant")
@@ -1662,7 +1665,7 @@ async def plant_crop(
     _, _, _, house = await household_context(session, character)
     farm = await farm_for_house(session, house.id) if house else None
     if not farm:
-        raise HTTPException(404, "Сначала постройте ферму.")
+        raise HTTPException(404, "Откройте раздел фермы во владении.")
     crop = CROPS.get(payload.crop_slug)
     if not crop:
         raise HTTPException(404, "Культура не найдена.")
@@ -2604,7 +2607,7 @@ async def npc_center(
     festival_active = local_date() <= "2026-08-25"
     spouse = next((member for member in members if member.id != character.id), None)
     return {
-        "prices": {"guard": 80, "peasant": 70},
+        "prices": {"guard": 80, "peasant": FARMER_PRICE},
         "shared_with": spouse.name if spouse else None,
         "festival": {
             "active": festival_active,
@@ -2630,7 +2633,7 @@ async def buy_npc_unit(
     session: AsyncSession=Depends(get_session),
 ):
     character = await require_character(user, session)
-    price = 80 if payload.npc_type == "guard" else 70
+    price = 80 if payload.npc_type == "guard" else FARMER_PRICE
     try:
         await change_gold(session, character, -price, f"buy_npc:{payload.npc_type}")
     except ValueError as exc:

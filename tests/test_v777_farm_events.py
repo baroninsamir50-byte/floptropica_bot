@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from app.farm_events import CROPS, ESTATE_EVENTS, FARM_PRICE, FARM_START_PLOTS, event_payload
+from app.farm_events import CROPS, ESTATE_EVENTS, FARM_PRICE, FARMER_PRICE, FARM_START_PLOTS, event_payload
 from app.models import Character, EstateEventCycle, Farm, FarmPlot, FarmStock, NpcUnit
 
 
 def test_farm_balance_and_models():
-    assert FARM_PRICE == 70
+    assert FARM_PRICE == 0
+    assert FARMER_PRICE == 70
     assert FARM_START_PLOTS == 3
     assert len(CROPS) == 5
     assert {"farm_tutorial_completed", "events_tutorial_completed"}.issubset(Character.__table__.columns.keys())
@@ -36,6 +37,8 @@ def test_frontend_has_one_time_tutorials_selected_events_and_auto_popup():
     assert 'GAME_TUTORIALS' in js
     assert '/tutorial/${kind}/complete' in js
     assert 'state.farm.tutorial_required' in js
+    assert 'Нанять первого фермера' in js
+    assert 'Построить за ${d.price}' not in js
     assert 'state.events?.tutorial_required' in js
     assert 'selectedEventsPanel' in js
     assert 'Ваши выбранные события' in js
@@ -61,5 +64,5 @@ def test_asset_credits_and_static_version_are_present():
     html = Path("app/miniapp/static/index.html").read_text(encoding="utf-8")
     assert 'Kenney' in credits and 'CC0' in credits
     assert 'Calciumtrice' in credits and 'CC BY 3.0' in credits
-    assert 'styles.css?v=7.7.7' in html
-    assert 'app.js?v=7.7.7' in html
+    assert 'styles.css?v=7.7.7.1' in html
+    assert 'app.js?v=7.7.7.1' in html
