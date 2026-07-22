@@ -65,6 +65,8 @@ class Character(Base):
     daily_npc_material_date: Mapped[str | None] = mapped_column(String(10))
     title_reward_date: Mapped[str | None] = mapped_column(String(10))
     story_reader_achievement_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
+    farm_tutorial_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    events_tutorial_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     title: Mapped[str] = mapped_column(String(64), default="Жители")
     training_date: Mapped[str | None] = mapped_column(String(10))
     work_count_date: Mapped[str | None] = mapped_column(String(10))
@@ -300,6 +302,10 @@ class NpcUnit(Base):
     agility: Mapped[int] = mapped_column(Integer, default=5)
     skill: Mapped[int] = mapped_column(Integer, default=5)
     fatigue: Mapped[int] = mapped_column(Integer, default=0)
+    hunger: Mapped[int] = mapped_column(Integer, default=0)
+    hunger_updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    starvation_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    exhaustion_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(32), default="idle", index=True)
     assignment: Mapped[str | None] = mapped_column(String(40))
     available_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -342,6 +348,79 @@ class StoryRead(Base):
         ForeignKey("characters.id", ondelete="CASCADE"), index=True
     )
     completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Farm(Base):
+    __tablename__ = "farms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    house_id: Mapped[int] = mapped_column(ForeignKey("houses.id", ondelete="CASCADE"), unique=True, index=True)
+    level: Mapped[int] = mapped_column(Integer, default=1)
+    plot_count: Mapped[int] = mapped_column(Integer, default=3)
+    barn_capacity: Mapped[int] = mapped_column(Integer, default=30)
+    farmer_npc_id: Mapped[int | None] = mapped_column(ForeignKey("npc_units.id", ondelete="SET NULL"), index=True)
+    auto_feed: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FarmPlot(Base):
+    __tablename__ = "farm_plots"
+    __table_args__ = (UniqueConstraint("farm_id", "slot", name="uq_farm_plot_slot"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    farm_id: Mapped[int] = mapped_column(ForeignKey("farms.id", ondelete="CASCADE"), index=True)
+    slot: Mapped[int] = mapped_column(Integer)
+    crop_slug: Mapped[str | None] = mapped_column(String(40), index=True)
+    planted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    water_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    watered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ready_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FarmStock(Base):
+    __tablename__ = "farm_stock"
+    __table_args__ = (UniqueConstraint("farm_id", "crop_slug", name="uq_farm_crop_stock"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    farm_id: Mapped[int] = mapped_column(ForeignKey("farms.id", ondelete="CASCADE"), index=True)
+    crop_slug: Mapped[str] = mapped_column(String(40), index=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class FarmMarketListing(Base):
+    __tablename__ = "farm_market_listings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    seller_character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    crop_slug: Mapped[str] = mapped_column(String(40), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    unit_price: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EstateEventCycle(Base):
+    __tablename__ = "estate_event_cycles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    character_id: Mapped[int] = mapped_column(ForeignKey("characters.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", index=True)
+    chosen_event_ids: Mapped[str] = mapped_column(Text, default="[]")
+    daily_options: Mapped[str] = mapped_column(Text, default="{}")
+    system_event_ids: Mapped[str] = mapped_column(Text, default="[]")
+    result_event_id: Mapped[str | None] = mapped_column(String(40))
+    result_kind: Mapped[str | None] = mapped_column(String(24))
+    result_text: Mapped[str | None] = mapped_column(Text)
+    matched_count: Mapped[int] = mapped_column(Integer, default=0)
+    reward_gold: Mapped[int] = mapped_column(Integer, default=0)
+    reward_item_slug: Mapped[str | None] = mapped_column(String(64))
+    result_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    guard_death_applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_choice_date: Mapped[str | None] = mapped_column(String(10))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
 
 
 class TarotCard(Base):

@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.keyboards import (
     admin_attack_players_keyboard,
     admin_extended_keyboard,
+    admin_event_media_keyboard,
     admin_media_keyboard,
     admin_marriage_keyboard,
     admin_players_keyboard,
@@ -20,6 +21,7 @@ from app.keyboards import (
 )
 from app.models import Character, GameEvent, House, HouseAttack, User
 from app.factions import WESTERN_FACTION, NEUTRAL_DIALOGUE, NO_FACTION, VIEW_LABELS
+from app.farm_events import ESTATE_EVENTS
 from app.services import (
     apply_levels,
     change_gold,
@@ -82,6 +84,8 @@ MEDIA_NAMES = {
     "tarot_back": "рубашки карт Таро",
     "icon_tarot": "иконки раздела Таро",
     "npc_bg": "фона раздела NPC",
+    "farm_bg": "фона фермы",
+    "icon_farm": "иконки фермы",
     "icon_npc": "иконки NPC",
     "room_bg": "фона комнат",
     "enemy_dragon_1": "модели дракона 1",
@@ -239,6 +243,9 @@ async def show_admin_home(message: Message) -> None:
         "Управление игроками, изображениями, домами и событиями.",
         reply_markup=admin_extended_keyboard(),
     )
+
+
+MEDIA_NAMES.update({f"event_card_{event['number']}": f"карточки события №{event['number']} — {event['title']}" for event in ESTATE_EVENTS})
 
 
 @router.message(Command("admin"))
@@ -428,6 +435,51 @@ async def clear_marriage_callback(callback: CallbackQuery, session: AsyncSession
     )
 
 
+@router.callback_query(F.data == "admin:event_media")
+async def admin_event_media_panel(callback: CallbackQuery) -> None:
+    if await deny_callback(callback):
+        return
+    await callback.answer()
+    event_rows = "\n\n".join(
+        f"{event['number']}. <b>{event['title']}</b>\n{event['impact']}"
+        for event in ESTATE_EVENTS
+    )
+    await callback.message.edit_text(
+        "🎴 <b>Оформление событий владения</b>\n\n"
+        f"{event_rows}\n\n"
+        "Выберите номер события и отправьте вертикальную картинку 4:5.",
+        reply_markup=admin_event_media_keyboard(ESTATE_EVENTS),
+    )
+
+
+@router.callback_query(F.data.startswith("adminevent:"))
+async def admin_event_media_request(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    if await deny_callback(callback):
+        return
+    try:
+        number = int(callback.data.split(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.answer("Неизвестный номер.", show_alert=True)
+        return
+    event = next((item for item in ESTATE_EVENTS if int(item["number"]) == number), None)
+    if not event:
+        await callback.answer("Событие не найдено.", show_alert=True)
+        return
+    key = f"event_card_{number}"
+    await state.set_state(AdminMediaUpload.photo)
+    await state.update_data(media_key=key)
+    await callback.answer()
+    await callback.message.answer(
+        f"🎴 <b>Событие №{number}: {event['title']}</b>\n\n"
+        f"{event['description']}\n\n"
+        f"<b>Последствие:</b> {event['impact']}\n\n"
+        "Отправьте изображение карточки. Рекомендуемый формат: 1080×1350 (4:5)."
+    )
+
+
 @router.callback_query(F.data == "admin:media")
 async def admin_media_panel(callback: CallbackQuery) -> None:
     if await deny_callback(callback):
@@ -479,9 +531,11 @@ async def admin_media_save(
 
     await set_system_media(session, key, message.photo[-1].file_id)
     await state.clear()
+    event_card = str(key).startswith("event_card_")
     await message.answer(
-        f"✅ Фотография раздела <b>{MEDIA_NAMES[key]}</b> обновлена.",
-        reply_markup=admin_media_keyboard(),
+        f"✅ Фотография раздела <b>{MEDIA_NAMES[key]}</b> обновлена."
+        + ("\nВыберите следующее событие для оформления." if event_card else ""),
+        reply_markup=(admin_event_media_keyboard(ESTATE_EVENTS) if event_card else admin_media_keyboard()),
     )
 
 

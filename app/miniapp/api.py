@@ -1,4 +1,4 @@
-from random import randint, choice
+from random import randint, choice, sample
 from datetime import datetime, timezone, timedelta
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -15,6 +15,7 @@ from app.database import SessionFactory
 from app.models import (
     InventoryItem, ItemTemplate, OwnedNpc, Duel, Character, User,
     SystemMedia, TarotCard, TarotReading, House, HouseAttack, HouseRoom, NpcUnit, PlayerStory, StoryRead,
+    Farm, FarmPlot, FarmStock, FarmMarketListing, EstateEventCycle,
 )
 from app.miniapp.auth import TelegramMiniAppUser, current_miniapp_user
 from app.services import (
@@ -25,10 +26,16 @@ from app.services import (
     get_effective_stats, household_members, GUARD_UPGRADE_ITEMS,
     FARMER_UPGRADE_ITEMS, NPC_UPGRADE_ITEMS, WORK_REWARD_MULTIPLIER,
     guard_model_variant, npc_model_variant, npc_upgrade_plan, npc_stat_gains, npc_power,
+    grant_inventory_item,
 )
 from app.work_catalog import available_professions, profession_by_key, title_can_use, profession_income_multiplier
 from app.miniapp.duel_engine import STYLES, initialize_duel, perform_action, log_list
 from app.tarot_service import create_daily_reading, offered_cards
+from app.farm_events import (
+    CROPS, FARM_PRICE, FARM_START_PLOTS, FARM_BARN_CAPACITY, MARKET_COMMISSION,
+    ESTATE_EVENTS, EVENT_BY_ID, CATEGORY_LABELS, json_list, json_dict,
+    event_options, event_payload,
+)
 from app.factions import (
     FACTIONS, TITLES, VIEW_LABELS, faction_development_bonus,
     faction_payload, normalize_faction,
@@ -118,6 +125,34 @@ class DuelAcceptRequest(BaseModel):
 class DuelActionRequest(BaseModel):
     action: Literal["attack","magic","defend","dodge","critical","potion"]
 
+class FarmPlantRequest(BaseModel):
+    plot_id: int
+    crop_slug: str = Field(min_length=1, max_length=40)
+
+class FarmPlotRequest(BaseModel):
+    plot_id: int
+
+class FarmAssignRequest(BaseModel):
+    npc_id: int | None = None
+
+class FarmFeedRequest(BaseModel):
+    npc_id: int
+    crop_slug: str = Field(min_length=1, max_length=40)
+
+class FarmAutoFeedRequest(BaseModel):
+    enabled: bool
+
+class FarmListingRequest(BaseModel):
+    crop_slug: str = Field(min_length=1, max_length=40)
+    quantity: int = Field(ge=1, le=99)
+    unit_price: int = Field(ge=1, le=999)
+
+class FarmBuyListingRequest(BaseModel):
+    listing_id: int
+
+class EstateEventChooseRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=40)
+
 
 async def telegram_file_response(file_id: str) -> Response:
     from app.config import get_settings
@@ -133,6 +168,27 @@ async def telegram_file_response(file_id: str) -> Response:
         )
     finally:
         await bot.session.close()
+
+
+def event_result_payload(cycle: EstateEventCycle | None) -> dict[str, object] | None:
+    if not cycle or cycle.result_event_id not in EVENT_BY_ID:
+        return None
+    event = event_payload(str(cycle.result_event_id))
+    kind_labels = {
+        "success": "СОБЫТИЕ ПРЕДОТВРАЩЕНО",
+        "partial": "УГРОЗА ЧАСТИЧНО ПРЕДОТВРАЩЕНА",
+        "critical": "СОБЫТИЕ АКТИВИРОВАЛОСЬ",
+    }
+    return {
+        "cycle_id": cycle.id,
+        "kind": cycle.result_kind,
+        "kind_label": kind_labels.get(str(cycle.result_kind), "ИТОГ ЦИКЛА"),
+        "event": event,
+        "text": cycle.result_text or "",
+        "matched_count": cycle.matched_count,
+        "reward_gold": cycle.reward_gold,
+        "reward_item_slug": cycle.reward_item_slug,
+    }
 
 
 @router.get("/bootstrap")
@@ -159,12 +215,20 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
     } for inv,item in inv_result.all()]
     npc_result=await session.execute(select(OwnedNpc).where(OwnedNpc.character_id==c.id))
     npcs={n.npc_type:n.quantity for n in npc_result.scalars()}
-    media_keys=("home_bg","hero_bg","house_bg","treasury","shop","development","factions","map","games_bg","inventory_bg","loading_bg","app_logo","topbar_bg","nav_bg","card_texture","frame_hero","frame_house","icon_hero","icon_house","icon_treasury","icon_shop","icon_map","icon_games","icon_factions","icon_inventory","icon_development","icon_daily","duel_bg","duel_frame","duel_vs","icon_customization","tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg","enemy_dragon_1","enemy_dragon_2","enemy_dragon_3","enemy_monster_1","enemy_monster_2","enemy_monster_3","enemy_anomaly_1","enemy_anomaly_2","enemy_anomaly_3","guard_model_1","guard_model_2","guard_model_3","peasant_model_1","peasant_model_2","peasant_model_3","npc_peasant_1","npc_peasant_2","npc_peasant_3","npc_farmer_1","npc_farmer_2","npc_farmer_3","npc_gardener_1","npc_gardener_2","npc_gardener_3","npc_forester_1","npc_forester_2","npc_forester_3","npc_miner_1","npc_miner_2","npc_miner_3","npc_fisher_1","npc_fisher_2","npc_fisher_3","npc_cook_1","npc_cook_2","npc_cook_3","npc_recruit_1","npc_recruit_2","npc_recruit_3","npc_guard_1","npc_guard_2","npc_guard_3","npc_veteran_1","npc_veteran_2","npc_veteran_3","npc_archer_1","npc_archer_2","npc_archer_3","npc_rider_1","npc_rider_2","npc_rider_3","npc_paladin_1","npc_paladin_2","npc_paladin_3","npc_dragon_tamer_1","npc_dragon_tamer_2","npc_dragon_tamer_3","npc_mage_1","npc_mage_2","npc_mage_3","npc_seer_1","npc_seer_2","npc_seer_3","npc_alchemist_1","npc_alchemist_2","npc_alchemist_3","npc_exorcist_1","npc_exorcist_2","npc_exorcist_3","npc_archmage_1","npc_archmage_2","npc_archmage_3","npc_merchant_1","npc_merchant_2","npc_merchant_3","npc_banker_1","npc_banker_2","npc_banker_3","npc_quartermaster_1","npc_quartermaster_2","npc_quartermaster_3","npc_treasurer_1","npc_treasurer_2","npc_treasurer_3","npc_judge_1","npc_judge_2","npc_judge_3","npc_scribe_1","npc_scribe_2","npc_scribe_3","npc_advisor_1","npc_advisor_2","npc_advisor_3","npc_chancellor_1","npc_chancellor_2","npc_chancellor_3","npc_bard_1","npc_bard_2","npc_bard_3","npc_artist_1","npc_artist_2","npc_artist_3","npc_librarian_1","npc_librarian_2","npc_librarian_3","npc_architect_1","npc_architect_2","npc_architect_3","npc_dog_1","npc_dog_2","npc_dog_3","npc_cat_1","npc_cat_2","npc_cat_3","npc_falcon_1","npc_falcon_2","npc_falcon_3","npc_small_dragon_1","npc_small_dragon_2","npc_small_dragon_3","npc_royal_architect_1","npc_royal_architect_2","npc_royal_architect_3","npc_great_magister_1","npc_great_magister_2","npc_great_magister_3","npc_royal_general_1","npc_royal_general_2","npc_royal_general_3","npc_forest_keeper_1","npc_forest_keeper_2","npc_forest_keeper_3","npc_angel_of_light_1","npc_angel_of_light_2","npc_angel_of_light_3")
+    media_keys=("home_bg","hero_bg","house_bg","treasury","shop","development","factions","map","games_bg","inventory_bg","loading_bg","app_logo","topbar_bg","nav_bg","card_texture","frame_hero","frame_house","icon_hero","icon_house","icon_treasury","icon_shop","icon_map","icon_games","icon_factions","icon_inventory","icon_development","icon_daily","duel_bg","duel_frame","duel_vs","icon_customization","tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg","farm_bg","icon_farm","enemy_dragon_1","enemy_dragon_2","enemy_dragon_3","enemy_monster_1","enemy_monster_2","enemy_monster_3","enemy_anomaly_1","enemy_anomaly_2","enemy_anomaly_3","guard_model_1","guard_model_2","guard_model_3","peasant_model_1","peasant_model_2","peasant_model_3","npc_peasant_1","npc_peasant_2","npc_peasant_3","npc_farmer_1","npc_farmer_2","npc_farmer_3","npc_gardener_1","npc_gardener_2","npc_gardener_3","npc_forester_1","npc_forester_2","npc_forester_3","npc_miner_1","npc_miner_2","npc_miner_3","npc_fisher_1","npc_fisher_2","npc_fisher_3","npc_cook_1","npc_cook_2","npc_cook_3","npc_recruit_1","npc_recruit_2","npc_recruit_3","npc_guard_1","npc_guard_2","npc_guard_3","npc_veteran_1","npc_veteran_2","npc_veteran_3","npc_archer_1","npc_archer_2","npc_archer_3","npc_rider_1","npc_rider_2","npc_rider_3","npc_paladin_1","npc_paladin_2","npc_paladin_3","npc_dragon_tamer_1","npc_dragon_tamer_2","npc_dragon_tamer_3","npc_mage_1","npc_mage_2","npc_mage_3","npc_seer_1","npc_seer_2","npc_seer_3","npc_alchemist_1","npc_alchemist_2","npc_alchemist_3","npc_exorcist_1","npc_exorcist_2","npc_exorcist_3","npc_archmage_1","npc_archmage_2","npc_archmage_3","npc_merchant_1","npc_merchant_2","npc_merchant_3","npc_banker_1","npc_banker_2","npc_banker_3","npc_quartermaster_1","npc_quartermaster_2","npc_quartermaster_3","npc_treasurer_1","npc_treasurer_2","npc_treasurer_3","npc_judge_1","npc_judge_2","npc_judge_3","npc_scribe_1","npc_scribe_2","npc_scribe_3","npc_advisor_1","npc_advisor_2","npc_advisor_3","npc_chancellor_1","npc_chancellor_2","npc_chancellor_3","npc_bard_1","npc_bard_2","npc_bard_3","npc_artist_1","npc_artist_2","npc_artist_3","npc_librarian_1","npc_librarian_2","npc_librarian_3","npc_architect_1","npc_architect_2","npc_architect_3","npc_dog_1","npc_dog_2","npc_dog_3","npc_cat_1","npc_cat_2","npc_cat_3","npc_falcon_1","npc_falcon_2","npc_falcon_3","npc_small_dragon_1","npc_small_dragon_2","npc_small_dragon_3","npc_royal_architect_1","npc_royal_architect_2","npc_royal_architect_3","npc_great_magister_1","npc_great_magister_2","npc_great_magister_3","npc_royal_general_1","npc_royal_general_2","npc_royal_general_3","npc_forest_keeper_1","npc_forest_keeper_2","npc_forest_keeper_3","npc_angel_of_light_1","npc_angel_of_light_2","npc_angel_of_light_3") + tuple(f"event_card_{number}" for number in range(1, 21))
     media={k:(f"/api/miniapp/media/{k}" if await get_system_media(session,k) else None) for k in media_keys}
     remaining=0
     if c.work_ends_at and not c.work_reward_claimed:
         remaining=max(0,int((c.work_ends_at-datetime.now(timezone.utc)).total_seconds()))
     bot_username = await get_bot_username()
+    pending_cycle = await session.scalar(
+        select(EstateEventCycle).where(
+            EstateEventCycle.character_id == c.id,
+            EstateEventCycle.status == "resolved",
+            EstateEventCycle.result_acknowledged.is_(False),
+        ).order_by(EstateEventCycle.id.desc())
+    )
+    pending_event_result = event_result_payload(pending_cycle) if pending_cycle else None
     return {
         "bot_username": bot_username,
         "hero":{"name":c.name,"level":c.level,"experience":c.experience,"experience_next":xp_for_next(c.level),
@@ -190,6 +254,7 @@ async def bootstrap(user: TelegramMiniAppUser=Depends(current_miniapp_user), ses
         "shop":{"date":local_date(),"items":[{"id":i.id,"name":i.name,"description":i.description,"price":i.price,
             "slot":i.slot,"rarity":i.rarity,"stat_name":i.stat_name,"stat_bonus":i.stat_bonus} for i in shop]},
         "inventory":inventory,"npcs":npcs,"media":media,
+        "pending_event_result": pending_event_result,
         "is_admin": await has_project_admin_rights(session, user.id),
         "is_owner": user.id in __import__("app.config", fromlist=["get_settings"]).get_settings().admins,
     }
@@ -269,7 +334,7 @@ async def miniapp_media(key: str):
         "icon_hero","icon_house","icon_treasury","icon_shop","icon_map",
         "icon_games","icon_factions","icon_inventory","icon_development",
         "icon_daily","duel_bg","duel_frame","duel_vs","icon_customization",
-        "tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg",
+        "tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg","farm_bg","icon_farm",
         "enemy_dragon_1","enemy_dragon_2","enemy_dragon_3",
         "enemy_monster_1","enemy_monster_2","enemy_monster_3",
         "enemy_anomaly_1","enemy_anomaly_2","enemy_anomaly_3",
@@ -396,6 +461,7 @@ async def miniapp_media(key: str):
         "npc_angel_of_light_2",
         "npc_angel_of_light_3"
     }
+    allowed.update({f"event_card_{number}" for number in range(1, 21)})
     if key not in allowed:
         raise HTTPException(404, "Изображение не найдено")
 
@@ -438,7 +504,7 @@ THEME_KEYS = {
     "icon_hero","icon_house","icon_treasury","icon_shop","icon_map",
     "icon_games","icon_factions","icon_inventory","icon_development",
     "icon_daily","duel_bg","duel_frame","duel_vs","icon_customization",
-    "tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg",
+    "tarot_bg","tarot_back","icon_tarot","npc_bg","icon_npc","room_bg","farm_bg","icon_farm",
     "enemy_dragon_1","enemy_dragon_2","enemy_dragon_3",
     "enemy_monster_1","enemy_monster_2","enemy_monster_3",
     "enemy_anomaly_1","enemy_anomaly_2","enemy_anomaly_3",
@@ -565,6 +631,7 @@ THEME_KEYS = {
     "npc_angel_of_light_2",
     "npc_angel_of_light_3"
 }
+THEME_KEYS.update({f"event_card_{number}" for number in range(1, 21)})
 
 async def duel_character_payload(session, character: Character):
     stats = await get_equipment_bonuses(session, character.id)
@@ -1134,11 +1201,45 @@ async def active_house_attack(session: AsyncSession, house_id: int):
     )
 
 
+def settle_npc_state(npc: NpcUnit, now: datetime | None = None) -> None:
+    """Завершает отдых/занятие и применяет мягкое правило смерти только после 24 часов игнорирования."""
+    now = now or datetime.now(timezone.utc)
+    available_at = _aware(npc.available_at)
+    if available_at and available_at <= now:
+        if npc.status == "resting":
+            recovery = 60 if npc.assignment == "rest_long" else 35
+            npc.fatigue = max(0, int(npc.fatigue or 0) - recovery)
+            npc.exhaustion_started_at = None
+        elif npc.status == "training":
+            npc.experience += 20
+            npc.skill += 2
+            npc.endurance += 1
+        npc.status = "idle"
+        npc.assignment = None
+        npc.available_at = None
+    sync_npc_vitals(npc, now)
+    if not npc.alive:
+        return
+    starvation = _aware(npc.starvation_started_at)
+    exhaustion = _aware(npc.exhaustion_started_at)
+    starving_too_long = bool(npc.hunger >= 100 and starvation and now - starvation >= timedelta(hours=24))
+    exhausted_too_long = bool(
+        npc.status != "resting" and npc.fatigue >= 100 and exhaustion
+        and now - exhaustion >= timedelta(hours=24)
+    )
+    if starving_too_long or exhausted_too_long:
+        npc.alive = False
+        npc.status = "dead"
+        npc.assignment = "starvation" if starving_too_long else "exhaustion"
+        npc.available_at = None
+
+
 async def npc_payload(
     npc: NpcUnit,
     collected_slugs: set[str] | None = None,
     owner_name: str | None = None,
 ) -> dict:
+    settle_npc_state(npc)
     remaining = 0
     if npc.available_at:
         available_at = npc.available_at
@@ -1194,6 +1295,8 @@ async def npc_payload(
         "stats": stats,
         "power": npc_power(npc),
         "fatigue": npc.fatigue,
+        "hunger": npc.hunger,
+        "condition": npc_condition(npc),
         "status": npc.status,
         "assignment": npc.assignment,
         "remaining_seconds": remaining,
@@ -1201,6 +1304,945 @@ async def npc_payload(
         "model_url": f"/api/miniapp/media/{npc.npc_type}_model_{model_variant}"
             if npc.npc_type in {"guard", "peasant"} else None,
     }
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def sync_npc_vitals(npc: NpcUnit, now: datetime | None = None) -> None:
+    """Лениво обновляет голод и безопасные состояния NPC."""
+    now = now or datetime.now(timezone.utc)
+    updated = _aware(npc.hunger_updated_at) or now
+    elapsed = max(0, int((now - updated).total_seconds()))
+    hunger_points = elapsed // (3 * 60 * 60)
+    if hunger_points:
+        npc.hunger = min(100, int(npc.hunger or 0) + hunger_points)
+        npc.hunger_updated_at = updated + timedelta(hours=hunger_points * 3)
+    elif npc.hunger_updated_at is None:
+        npc.hunger_updated_at = now
+
+    if npc.hunger >= 100:
+        npc.starvation_started_at = _aware(npc.starvation_started_at) or now
+    else:
+        npc.starvation_started_at = None
+    if npc.fatigue >= 100:
+        npc.exhaustion_started_at = _aware(npc.exhaustion_started_at) or now
+    else:
+        npc.exhaustion_started_at = None
+
+
+def npc_condition(npc: NpcUnit) -> dict[str, object]:
+    if not npc.alive:
+        return {"label": "Погиб", "severity": "critical", "work_multiplier": 0.0}
+    if npc.status == "resting":
+        return {"label": "Отдыхает", "severity": "safe", "work_multiplier": 0.0}
+    if npc.hunger >= 100 or npc.fatigue >= 100:
+        return {"label": "Истощён", "severity": "critical", "work_multiplier": 0.0}
+    if npc.hunger >= 90 or npc.fatigue >= 90:
+        return {"label": "Не может работать", "severity": "danger", "work_multiplier": 0.0}
+    if npc.hunger >= 70 or npc.fatigue >= 70:
+        return {"label": "Ослаблен", "severity": "warning", "work_multiplier": 0.85}
+    return {"label": "В норме", "severity": "normal", "work_multiplier": 1.0}
+
+
+async def farm_for_house(session: AsyncSession, house_id: int) -> Farm | None:
+    return await session.scalar(select(Farm).where(Farm.house_id == house_id))
+
+
+async def stock_rows(session: AsyncSession, farm_id: int) -> list[FarmStock]:
+    result = await session.execute(
+        select(FarmStock).where(FarmStock.farm_id == farm_id).order_by(FarmStock.crop_slug)
+    )
+    return list(result.scalars())
+
+
+async def barn_used(session: AsyncSession, farm_id: int) -> int:
+    amount = await session.scalar(
+        select(func.coalesce(func.sum(FarmStock.quantity), 0)).where(FarmStock.farm_id == farm_id)
+    )
+    return int(amount or 0)
+
+
+async def add_crop_stock(session: AsyncSession, farm: Farm, crop_slug: str, quantity: int) -> int:
+    used = await barn_used(session, farm.id)
+    accepted = max(0, min(int(quantity), int(farm.barn_capacity) - used))
+    if accepted <= 0:
+        return 0
+    row = await session.scalar(
+        select(FarmStock).where(FarmStock.farm_id == farm.id, FarmStock.crop_slug == crop_slug)
+    )
+    if row:
+        row.quantity += accepted
+    else:
+        session.add(FarmStock(farm_id=farm.id, crop_slug=crop_slug, quantity=accepted))
+    return accepted
+
+
+async def take_crop_stock(session: AsyncSession, farm: Farm, crop_slug: str, quantity: int) -> None:
+    row = await session.scalar(
+        select(FarmStock).where(FarmStock.farm_id == farm.id, FarmStock.crop_slug == crop_slug)
+    )
+    if not row or row.quantity < quantity:
+        raise HTTPException(400, "В амбаре недостаточно урожая.")
+    row.quantity -= quantity
+    if row.quantity <= 0:
+        await session.delete(row)
+
+
+def clear_plot(plot: FarmPlot) -> None:
+    plot.crop_slug = None
+    plot.planted_at = None
+    plot.water_due_at = None
+    plot.watered_at = None
+    plot.ready_at = None
+
+
+async def sync_farm_automation(
+    session: AsyncSession,
+    farm: Farm,
+    member_ids: list[int],
+) -> None:
+    """Фермер автоматически обслуживает две грядки; третья остаётся игроку."""
+    if not farm.farmer_npc_id:
+        return
+    farmer = await session.get(NpcUnit, farm.farmer_npc_id)
+    if not farmer or farmer.character_id not in member_ids or farmer.npc_type != "peasant" or not farmer.alive:
+        farm.farmer_npc_id = None
+        return
+    settle_npc_state(farmer)
+    condition = npc_condition(farmer)
+    if condition["work_multiplier"] == 0 or farmer.status not in {"idle", "working"}:
+        return
+    now = datetime.now(timezone.utc)
+    result = await session.execute(
+        select(FarmPlot).where(FarmPlot.farm_id == farm.id).order_by(FarmPlot.slot)
+    )
+    active = [plot for plot in result.scalars() if plot.crop_slug]
+    capacity = min(3, 2 + max(0, farmer.skill - 20) // 20)
+    for plot in active[:capacity]:
+        if farmer.fatigue >= 90 or farmer.hunger >= 90:
+            break
+        water_due = _aware(plot.water_due_at)
+        ready_at = _aware(plot.ready_at)
+        if not plot.watered_at and water_due and now >= water_due:
+            plot.watered_at = now
+            farmer.fatigue = min(100, farmer.fatigue + 4)
+            farmer.hunger = min(100, farmer.hunger + 2)
+            farmer.experience += 2
+        if plot.watered_at and ready_at and now >= ready_at and plot.crop_slug in CROPS:
+            crop = CROPS[plot.crop_slug]
+            accepted = await add_crop_stock(session, farm, plot.crop_slug, int(crop["yield"]))
+            if accepted <= 0:
+                break
+            clear_plot(plot)
+            farmer.fatigue = min(100, farmer.fatigue + 6)
+            farmer.hunger = min(100, farmer.hunger + 4)
+            farmer.experience += 4 + farmer.level
+    sync_npc_vitals(farmer, now)
+
+
+async def auto_feed_household(
+    session: AsyncSession,
+    farm: Farm,
+    member_ids: list[int],
+) -> None:
+    if not farm.auto_feed:
+        return
+    result = await session.execute(
+        select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids),
+            NpcUnit.alive.is_(True),
+            NpcUnit.hunger >= 70,
+        ).order_by(NpcUnit.hunger.desc())
+    )
+    npcs = list(result.scalars())
+    if not npcs:
+        return
+    stocks = await stock_rows(session, farm.id)
+    stock_map = {row.crop_slug: row for row in stocks if row.quantity > 0}
+    crop_order = sorted(CROPS, key=lambda slug: int(CROPS[slug]["hunger_restore"]), reverse=True)
+    for npc in npcs:
+        sync_npc_vitals(npc)
+        while npc.hunger >= 50:
+            selected = next((slug for slug in crop_order if stock_map.get(slug) and stock_map[slug].quantity > 0), None)
+            if not selected:
+                break
+            row = stock_map[selected]
+            row.quantity -= 1
+            npc.hunger = max(0, npc.hunger - int(CROPS[selected]["hunger_restore"]))
+            npc.starvation_started_at = None
+            if row.quantity <= 0:
+                await session.delete(row)
+                stock_map.pop(selected, None)
+
+
+async def household_live_npcs(session: AsyncSession, member_ids: list[int]) -> list[NpcUnit]:
+    result = await session.execute(
+        select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids),
+            NpcUnit.alive.is_(True),
+        ).order_by(NpcUnit.npc_type, NpcUnit.name)
+    )
+    units = list(result.scalars())
+    for unit in units:
+        settle_npc_state(unit)
+    return [unit for unit in units if unit.alive]
+
+
+async def farm_payload(
+    session: AsyncSession,
+    farm: Farm,
+    member_ids: list[int],
+    members: list[Character],
+) -> dict[str, object]:
+    await sync_farm_automation(session, farm, member_ids)
+    await auto_feed_household(session, farm, member_ids)
+    plots_result = await session.execute(
+        select(FarmPlot).where(FarmPlot.farm_id == farm.id).order_by(FarmPlot.slot)
+    )
+    plots = list(plots_result.scalars())
+    stocks = await stock_rows(session, farm.id)
+    farmer = await session.get(NpcUnit, farm.farmer_npc_id) if farm.farmer_npc_id else None
+    now = datetime.now(timezone.utc)
+    manageable = set()
+    if farmer:
+        manageable = {plot.id for plot in [p for p in plots if p.crop_slug][:min(3, 2 + max(0, farmer.skill - 20) // 20)]}
+    plot_payloads = []
+    for plot in plots:
+        crop = CROPS.get(plot.crop_slug or "")
+        ready_at = _aware(plot.ready_at)
+        water_due = _aware(plot.water_due_at)
+        remaining = max(0, int((ready_at - now).total_seconds())) if ready_at else 0
+        if not crop:
+            stage = "empty"
+        elif ready_at and now >= ready_at and plot.watered_at:
+            stage = "ready"
+        elif not plot.watered_at and water_due and now >= water_due:
+            stage = "needs_water"
+        elif plot.watered_at:
+            stage = "growing"
+        else:
+            stage = "sprout"
+        plot_payloads.append({
+            "id": plot.id, "slot": plot.slot, "crop_slug": plot.crop_slug,
+            "crop": ({**crop, "slug": plot.crop_slug} if crop else None),
+            "stage": stage, "remaining_seconds": remaining,
+            "watered": bool(plot.watered_at), "auto_managed": plot.id in manageable,
+        })
+    peasant_result = await session.execute(
+        select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids), NpcUnit.npc_type == "peasant", NpcUnit.alive.is_(True)
+        ).order_by(NpcUnit.level.desc(), NpcUnit.id)
+    )
+    farmers = list(peasant_result.scalars())
+    all_npcs_result = await session.execute(
+        select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids), NpcUnit.alive.is_(True)
+        ).order_by(NpcUnit.npc_type, NpcUnit.level.desc(), NpcUnit.id)
+    )
+    all_npcs = list(all_npcs_result.scalars())
+    for npc in all_npcs:
+        sync_npc_vitals(npc, now)
+    owner_names = {member.id: member.name for member in members}
+    return {
+        "built": True,
+        "price": FARM_PRICE,
+        "farm": {
+            "id": farm.id, "level": farm.level, "plot_count": farm.plot_count,
+            "barn_capacity": farm.barn_capacity, "barn_used": sum(row.quantity for row in stocks),
+            "auto_feed": farm.auto_feed,
+            "farmer_npc_id": farm.farmer_npc_id,
+        },
+        "plots": plot_payloads,
+        "stock": [{
+            "crop_slug": row.crop_slug, "quantity": row.quantity,
+            "crop": {**CROPS[row.crop_slug], "slug": row.crop_slug},
+        } for row in stocks if row.crop_slug in CROPS and row.quantity > 0],
+        "crops": [{**data, "slug": slug} for slug, data in CROPS.items()],
+        "farmers": [{
+            "id": npc.id, "name": npc.name, "level": npc.level,
+            "fatigue": npc.fatigue, "hunger": npc.hunger,
+            "owner_name": owner_names.get(npc.character_id),
+            "condition": npc_condition(npc),
+        } for npc in farmers],
+        "assigned_farmer": ({
+            "id": farmer.id, "name": farmer.name, "level": farmer.level,
+            "fatigue": farmer.fatigue, "hunger": farmer.hunger,
+            "condition": npc_condition(farmer),
+        } if farmer else None),
+        "npcs": [
+            {"id": npc.id, "name": npc.name, "type": npc.npc_type, "hunger": npc.hunger, "fatigue": npc.fatigue}
+            for npc in await household_live_npcs(session, member_ids)
+        ],
+        "visual_assets": {
+            "kenney_scene": "https://opengameart.org/sites/default/files/styles/medium/public/sample_95.png",
+            "kenney_preview": "https://opengameart.org/sites/default/files/styles/medium/public/preview_1116.png",
+            "medieval_tiles": "https://opengameart.org/sites/default/files/medieval%20tileset%20exterior.png",
+            "farm_props": "https://lpc.opengameart.org/sites/default/files/styles/medium/public/tileset_preview.png",
+        },
+    }
+
+
+@router.get("/farm")
+async def farm_center(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    members, member_ids, _, house = await household_context(session, character)
+    if not house:
+        raise HTTPException(404, "Сначала создайте владение.")
+    farm = await farm_for_house(session, house.id)
+    if not farm:
+        return {
+            "built": False, "price": FARM_PRICE, "plots": [], "stock": [],
+            "tutorial_required": not character.farm_tutorial_completed,
+            "crops": [{**data, "slug": slug} for slug, data in CROPS.items()],
+            "visual_assets": {
+                "kenney_scene": "https://opengameart.org/sites/default/files/styles/medium/public/sample_95.png",
+                "kenney_preview": "https://opengameart.org/sites/default/files/styles/medium/public/preview_1116.png",
+                "medieval_tiles": "https://opengameart.org/sites/default/files/medieval%20tileset%20exterior.png",
+                "farm_props": "https://lpc.opengameart.org/sites/default/files/styles/medium/public/tileset_preview.png",
+            },
+        }
+    payload = await farm_payload(session, farm, member_ids, members)
+    payload["tutorial_required"] = not character.farm_tutorial_completed
+    listings_result = await session.execute(
+        select(FarmMarketListing, Character)
+        .join(Character, Character.id == FarmMarketListing.seller_character_id)
+        .where(FarmMarketListing.status == "active", FarmMarketListing.expires_at > datetime.now(timezone.utc))
+        .order_by(FarmMarketListing.created_at.desc())
+    )
+    payload["market"] = [{
+        "id": listing.id, "crop_slug": listing.crop_slug,
+        "crop": {**CROPS[listing.crop_slug], "slug": listing.crop_slug},
+        "quantity": listing.quantity, "unit_price": listing.unit_price,
+        "total_price": listing.quantity * listing.unit_price,
+        "seller_id": seller.id, "seller_name": seller.name,
+        "is_mine": seller.id == character.id,
+    } for listing, seller in listings_result.all() if listing.crop_slug in CROPS]
+    return payload
+
+
+@router.post("/farm/build")
+async def build_farm(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    if not house:
+        raise HTTPException(404, "Сначала создайте владение.")
+    if await farm_for_house(session, house.id):
+        raise HTTPException(400, "Ферма уже построена.")
+    try:
+        await change_gold(session, character, -FARM_PRICE, "build_farm")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    farm = Farm(
+        house_id=house.id, level=1, plot_count=FARM_START_PLOTS,
+        barn_capacity=FARM_BARN_CAPACITY, auto_feed=True,
+    )
+    session.add(farm)
+    await session.flush()
+    for slot in range(1, FARM_START_PLOTS + 1):
+        session.add(FarmPlot(farm_id=farm.id, slot=slot))
+    return {"ok": True, "message": "Ферма построена. Открыто 3 грядки.", "gold": character.gold}
+
+
+@router.post("/farm/plant")
+async def plant_crop(
+    payload: FarmPlantRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    if not farm:
+        raise HTTPException(404, "Сначала постройте ферму.")
+    crop = CROPS.get(payload.crop_slug)
+    if not crop:
+        raise HTTPException(404, "Культура не найдена.")
+    plot = await session.get(FarmPlot, payload.plot_id)
+    if not plot or plot.farm_id != farm.id:
+        raise HTTPException(404, "Грядка не найдена.")
+    if plot.crop_slug:
+        raise HTTPException(400, "Грядка уже занята.")
+    try:
+        await change_gold(session, character, -int(crop["seed_price"]), f"farm_seed:{payload.crop_slug}")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    now = datetime.now(timezone.utc)
+    growth = timedelta(hours=int(crop["growth_hours"]))
+    plot.crop_slug = payload.crop_slug
+    plot.planted_at = now
+    plot.water_due_at = now + growth * 0.35
+    plot.watered_at = None
+    plot.ready_at = now + growth
+    return {"ok": True, "message": f"Посажено: {crop['name']}.", "gold": character.gold}
+
+
+@router.post("/farm/water")
+async def water_plot(
+    payload: FarmPlotRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    plot = await session.get(FarmPlot, payload.plot_id)
+    if not farm or not plot or plot.farm_id != farm.id or not plot.crop_slug:
+        raise HTTPException(404, "Растение на грядке не найдено.")
+    if plot.watered_at:
+        raise HTTPException(400, "Грядка уже полита.")
+    plot.watered_at = datetime.now(timezone.utc)
+    character.experience += 2
+    apply_levels(character)
+    return {"ok": True, "message": "Грядка полита вручную."}
+
+
+@router.post("/farm/harvest")
+async def harvest_plot(
+    payload: FarmPlotRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    plot = await session.get(FarmPlot, payload.plot_id)
+    if not farm or not plot or plot.farm_id != farm.id or not plot.crop_slug:
+        raise HTTPException(404, "Урожай не найден.")
+    if not plot.watered_at:
+        raise HTTPException(400, "Сначала полейте грядку.")
+    ready_at = _aware(plot.ready_at)
+    if not ready_at or datetime.now(timezone.utc) < ready_at:
+        raise HTTPException(400, "Урожай ещё не созрел.")
+    crop_slug = plot.crop_slug
+    crop = CROPS[crop_slug]
+    accepted = await add_crop_stock(session, farm, crop_slug, int(crop["yield"]))
+    if accepted <= 0:
+        raise HTTPException(400, "Амбар заполнен. Продайте или используйте часть урожая.")
+    clear_plot(plot)
+    character.experience += 4
+    apply_levels(character)
+    return {"ok": True, "message": f"Собрано {accepted} ед.: {crop['name']}."}
+
+
+@router.post("/farm/assign")
+async def assign_farmer(
+    payload: FarmAssignRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, member_ids, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    if not farm:
+        raise HTTPException(404, "Ферма не построена.")
+    if payload.npc_id is None:
+        farm.farmer_npc_id = None
+        return {"ok": True, "message": "Фермер снят с работы. Грядки обслуживаются вручную."}
+    npc = await session.get(NpcUnit, payload.npc_id)
+    if not npc or npc.character_id not in member_ids or npc.npc_type != "peasant" or not npc.alive:
+        raise HTTPException(404, "Подходящий фермер не найден.")
+    sync_npc_vitals(npc)
+    if npc.hunger >= 90 or npc.fatigue >= 90:
+        raise HTTPException(400, "Этот фермер слишком голоден или устал.")
+    farm.farmer_npc_id = npc.id
+    return {"ok": True, "message": f"{npc.name} назначен на ферму и автоматически обслуживает 2 грядки."}
+
+
+@router.post("/farm/feed")
+async def feed_npc_from_farm(
+    payload: FarmFeedRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, member_ids, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    npc = await session.get(NpcUnit, payload.npc_id)
+    crop = CROPS.get(payload.crop_slug)
+    if not farm or not npc or npc.character_id not in member_ids or not npc.alive or not crop:
+        raise HTTPException(404, "Не удалось накормить NPC.")
+    await take_crop_stock(session, farm, payload.crop_slug, 1)
+    sync_npc_vitals(npc)
+    restored = int(crop["hunger_restore"])
+    npc.hunger = max(0, npc.hunger - restored)
+    npc.starvation_started_at = None
+    return {"ok": True, "message": f"{npc.name} поел: голод уменьшен на {restored}."}
+
+
+@router.post("/farm/auto-feed")
+async def set_auto_feed(
+    payload: FarmAutoFeedRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    if not farm:
+        raise HTTPException(404, "Ферма не построена.")
+    farm.auto_feed = payload.enabled
+    return {"ok": True, "message": "Автокормление включено." if payload.enabled else "Автокормление отключено."}
+
+
+@router.post("/farm/market/list")
+async def list_farm_crop(
+    payload: FarmListingRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    _, _, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    crop = CROPS.get(payload.crop_slug)
+    if not farm or not crop:
+        raise HTTPException(404, "Ферма или культура не найдена.")
+    active_count = await session.scalar(select(func.count(FarmMarketListing.id)).where(
+        FarmMarketListing.seller_character_id == character.id,
+        FarmMarketListing.status == "active",
+        FarmMarketListing.expires_at > datetime.now(timezone.utc),
+    ))
+    if int(active_count or 0) >= 5:
+        raise HTTPException(400, "Можно держать не больше пяти объявлений.")
+    base = int(crop["base_price"])
+    minimum = max(1, (base + 1) // 2)
+    maximum = base * 2
+    if not minimum <= payload.unit_price <= maximum:
+        raise HTTPException(400, f"Цена должна быть от {minimum} до {maximum} монет за единицу.")
+    await take_crop_stock(session, farm, payload.crop_slug, payload.quantity)
+    listing = FarmMarketListing(
+        seller_character_id=character.id, crop_slug=payload.crop_slug,
+        quantity=payload.quantity, unit_price=payload.unit_price,
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+    )
+    session.add(listing)
+    return {"ok": True, "message": "Урожай выставлен на торговой площади."}
+
+
+@router.post("/farm/market/buy")
+async def buy_farm_listing(
+    payload: FarmBuyListingRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    buyer = await require_character(user, session)
+    _, _, _, buyer_house = await household_context(session, buyer)
+    buyer_farm = await farm_for_house(session, buyer_house.id) if buyer_house else None
+    listing = await session.get(FarmMarketListing, payload.listing_id)
+    if not buyer_farm or not listing or listing.status != "active":
+        raise HTTPException(404, "Объявление недоступно.")
+    if listing.expires_at <= datetime.now(timezone.utc):
+        listing.status = "return_pending"
+        raise HTTPException(400, "Срок объявления истёк. Урожай будет возвращён в амбар.")
+    if listing.seller_character_id == buyer.id:
+        raise HTTPException(400, "Нельзя купить собственный товар.")
+    if await barn_used(session, buyer_farm.id) + listing.quantity > buyer_farm.barn_capacity:
+        raise HTTPException(400, "В вашем амбаре недостаточно места.")
+    seller = await session.get(Character, listing.seller_character_id)
+    if not seller:
+        raise HTTPException(404, "Продавец не найден.")
+    total = listing.quantity * listing.unit_price
+    try:
+        await change_gold(session, buyer, -total, f"farm_market_buy:{listing.id}")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    seller_income = max(1, int(total * (1 - MARKET_COMMISSION)))
+    await change_gold(session, seller, seller_income, f"farm_market_sale:{listing.id}")
+    await add_crop_stock(session, buyer_farm, listing.crop_slug, listing.quantity)
+    listing.status = "sold"
+    return {"ok": True, "message": f"Покупка завершена. Продавец получил {seller_income} монет."}
+
+
+async def current_event_cycle(session: AsyncSession, character: Character) -> EstateEventCycle:
+    cycle = await session.scalar(
+        select(EstateEventCycle).where(
+            EstateEventCycle.character_id == character.id,
+            EstateEventCycle.status == "active",
+        ).order_by(EstateEventCycle.id.desc())
+    )
+    if cycle:
+        return cycle
+    latest = await session.scalar(
+        select(EstateEventCycle).where(EstateEventCycle.character_id == character.id)
+        .order_by(EstateEventCycle.id.desc())
+    )
+    if latest and latest.status == "resolved":
+        resolved_at = _aware(latest.resolved_at)
+        critical_protection = bool(
+            latest.result_kind == "critical" and resolved_at
+            and datetime.now(timezone.utc) - resolved_at < timedelta(hours=24)
+        )
+        if not latest.result_acknowledged or latest.last_choice_date == local_date() or critical_protection:
+            return latest
+    cycle = EstateEventCycle(character_id=character.id)
+    session.add(cycle)
+    await session.flush()
+    return cycle
+
+
+async def destroy_random_plots(session: AsyncSession, farm: Farm | None, count: int) -> int:
+    if not farm:
+        return 0
+    result = await session.execute(
+        select(FarmPlot).where(FarmPlot.farm_id == farm.id, FarmPlot.crop_slug.is_not(None))
+    )
+    plots = list(result.scalars())
+    selected = sample(plots, min(count, len(plots))) if plots else []
+    for plot in selected:
+        clear_plot(plot)
+    return len(selected)
+
+
+async def remove_stock_percent(session: AsyncSession, farm: Farm | None, percent: int) -> int:
+    if not farm:
+        return 0
+    rows = await stock_rows(session, farm.id)
+    removed = 0
+    for row in rows:
+        amount = max(0, min(row.quantity, (row.quantity * percent + 99) // 100))
+        row.quantity -= amount
+        removed += amount
+        if row.quantity <= 0:
+            await session.delete(row)
+    return removed
+
+
+async def remove_random_inventory(session: AsyncSession, character: Character, count: int) -> list[str]:
+    protected = set(NPC_UPGRADE_ITEMS) | {"development_points_30", "house_repair_potion"}
+    result = await session.execute(
+        select(InventoryItem, ItemTemplate)
+        .join(ItemTemplate, ItemTemplate.id == InventoryItem.item_id)
+        .where(
+            InventoryItem.character_id == character.id,
+            InventoryItem.quantity > 0,
+            InventoryItem.equipped.is_(False),
+        )
+    )
+    candidates = [(inv, item) for inv, item in result.all() if item.slug not in protected]
+    picked = sample(candidates, min(count, len(candidates))) if candidates else []
+    removed = []
+    for inv, item in picked:
+        removed.append(item.name)
+        inv.quantity -= 1
+        if inv.quantity <= 0:
+            await session.delete(inv)
+    return removed
+
+
+async def event_impact(
+    session: AsyncSession,
+    character: Character,
+    event_id: str,
+    partial: bool,
+    cycle: EstateEventCycle | None = None,
+) -> str:
+    members, member_ids, _, house = await household_context(session, character)
+    farm = await farm_for_house(session, house.id) if house else None
+    scale = 0.5 if partial else 1.0
+    event = EVENT_BY_ID[event_id]
+    title = str(event["title"])
+
+    if event_id == "guard_revolt":
+        damage = max(1, int(randint(40, 50) * scale))
+        if house:
+            house.integrity = max(0, house.integrity - damage)
+        guards_result = await session.execute(select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids), NpcUnit.npc_type == "guard", NpcUnit.alive.is_(True)
+        ).order_by(NpcUnit.fatigue.desc(), NpcUnit.hunger.desc()))
+        guards = list(guards_result.scalars())
+        extra = ""
+        if guards:
+            guard = guards[0]
+            sync_npc_vitals(guard)
+            recent_guard_death = await session.scalar(
+                select(EstateEventCycle.id).where(
+                    EstateEventCycle.character_id == character.id,
+                    EstateEventCycle.guard_death_applied.is_(True),
+                    EstateEventCycle.resolved_at >= datetime.now(timezone.utc) - timedelta(days=14),
+                    *( [EstateEventCycle.id != cycle.id] if cycle and cycle.id else [] ),
+                ).limit(1)
+            )
+            may_die = bool(
+                not partial and not recent_guard_death
+                and (guard.fatigue >= 90 or guard.hunger >= 90)
+            )
+            if may_die:
+                guard.alive = False
+                guard.status = "dead"
+                if cycle:
+                    cycle.guard_death_applied = True
+                extra = f" {guard.name} погиб во время мятежа."
+            else:
+                guard.status = "resting"
+                guard.assignment = "injured"
+                guard.available_at = datetime.now(timezone.utc) + timedelta(hours=24)
+                extra = f" {guard.name} ранен и отдыхает 24 часа."
+        return f"{title}: владение потеряло {damage} прочности.{extra}"
+
+    if event_id in {"captain_plot", "gate_betrayal", "guard_desertion"}:
+        guards_result = await session.execute(select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids), NpcUnit.npc_type == "guard", NpcUnit.alive.is_(True)
+        ).order_by(NpcUnit.level.desc()))
+        guard = guards_result.scalars().first()
+        if guard:
+            hours = 12 if partial else (48 if event_id == "guard_desertion" else 24)
+            guard.status = "resting"
+            guard.assignment = "event_recovery"
+            guard.available_at = datetime.now(timezone.utc) + timedelta(hours=hours)
+            if event_id == "gate_betrayal" and house:
+                damage = max(1, int(randint(18, 28) * scale))
+                house.integrity = max(0, house.integrity - damage)
+                return f"{title}: {guard.name} выбыл на {hours} ч., дом потерял {damage} прочности."
+            return f"{title}: {guard.name} недоступен {hours} часов."
+        damage = max(1, int(randint(12, 22) * scale))
+        if house:
+            house.integrity = max(0, house.integrity - damage)
+        return f"{title}: стражи нет, владение потеряло {damage} прочности."
+
+    if event_id == "peasant_theft":
+        removed = await remove_stock_percent(session, farm, 25 if partial else 50)
+        return f"{title}: из амбара пропало {removed} ед. урожая."
+    if event_id == "harvest_riot":
+        removed = await destroy_random_plots(session, farm, 1 if partial else 3)
+        return f"{title}: уничтожено грядок — {removed}."
+    if event_id == "barn_rot":
+        removed = await remove_stock_percent(session, farm, 15 if partial else 30)
+        return f"{title}: испорчено {removed} ед. запасов."
+    if event_id == "seed_swap":
+        removed = await destroy_random_plots(session, farm, 1 if partial else 2)
+        return f"{title}: опустело грядок — {removed}."
+
+    if event_id == "bandit_raid":
+        removed = await remove_random_inventory(session, character, 2 if partial else 5)
+        return f"{title}: потеряны предметы: {', '.join(removed) if removed else 'подходящих вещей не было'}."
+    if event_id == "trade_ambush":
+        percent = randint(10, 15) if partial else randint(20, 30)
+        lost = min(character.gold, max(0, int(character.gold * percent / 100)))
+        if lost:
+            await change_gold(session, character, -lost, "estate_event:trade_ambush")
+        return f"{title}: потеряно {lost} монет ({percent}%)."
+    if event_id == "warehouse_breakin":
+        removed = await remove_random_inventory(session, character, 1 if partial else 3)
+        stock_lost = await remove_stock_percent(session, farm, 10 if partial else 20)
+        return f"{title}: пропало предметов {len(removed)} и {stock_lost} ед. урожая."
+    if event_id == "false_taxmen":
+        percent = 10 if partial else 20
+        lost = min(character.gold, int(character.gold * percent / 100))
+        if lost:
+            await change_gold(session, character, -lost, "estate_event:false_tax")
+        return f"{title}: отдано {lost} монет."
+
+    if event_id == "monster_horde":
+        damage = max(1, int(randint(25, 35) * scale))
+        if house:
+            house.integrity = max(0, house.integrity - damage)
+        return f"{title}: владение потеряло {damage} прочности."
+    if event_id == "dragon_over_farm":
+        removed = await destroy_random_plots(session, farm, 1 if partial else 2)
+        return f"{title}: дракон уничтожил грядок — {removed}."
+    if event_id == "rift_rats":
+        removed = await remove_stock_percent(session, farm, 20 if partial else 40)
+        return f"{title}: крысы съели {removed} ед. еды."
+    if event_id == "walking_plague":
+        fatigue = 10 if partial else 20
+        hunger = 12 if partial else 25
+        result = await session.execute(select(NpcUnit).where(
+            NpcUnit.character_id.in_(member_ids), NpcUnit.alive.is_(True)
+        ))
+        count = 0
+        for npc in result.scalars():
+            sync_npc_vitals(npc)
+            npc.fatigue = min(100, npc.fatigue + fatigue)
+            npc.hunger = min(100, npc.hunger + hunger)
+            count += 1
+        return f"{title}: {count} NPC получили +{fatigue} усталости и +{hunger} голода."
+
+    if event_id == "magic_storm":
+        damage = max(1, int(20 * scale))
+        if house:
+            house.integrity = max(0, house.integrity - damage)
+        return f"{title}: владение потеряло {damage} прочности."
+    if event_id == "great_drought":
+        hours = 4 if partial else 8
+        if farm:
+            result = await session.execute(select(FarmPlot).where(
+                FarmPlot.farm_id == farm.id, FarmPlot.crop_slug.is_not(None)
+            ))
+            for plot in result.scalars():
+                if plot.ready_at:
+                    plot.ready_at = _aware(plot.ready_at) + timedelta(hours=hours)
+        return f"{title}: рост культур задержан на {hours} часов."
+    if event_id == "cursed_rain":
+        removed = await destroy_random_plots(session, farm, 1 if partial else 2)
+        return f"{title}: пострадало грядок — {removed}."
+    if event_id == "forest_wrath":
+        removed = await remove_stock_percent(session, farm, 12 if partial else 25)
+        if removed:
+            return f"{title}: духи забрали {removed} ед. урожая."
+        lost = min(character.gold, 8 if partial else 15)
+        if lost:
+            await change_gold(session, character, -lost, "estate_event:forest_wrath")
+        return f"{title}: духи забрали {lost} монет."
+    return f"{title}: событие произошло, но ущерб оказался минимальным."
+
+
+async def resolve_event_cycle(
+    session: AsyncSession,
+    character: Character,
+    cycle: EstateEventCycle,
+) -> None:
+    chosen = json_list(cycle.chosen_event_ids)
+    previous = await session.scalar(
+        select(EstateEventCycle).where(
+            EstateEventCycle.character_id == character.id,
+            EstateEventCycle.id != cycle.id,
+            EstateEventCycle.status == "resolved",
+        ).order_by(EstateEventCycle.id.desc())
+    )
+    excluded = {str(previous.result_event_id)} if previous and previous.result_event_id in EVENT_BY_ID else set()
+    system_ids = event_options(exclude=excluded, count=3)
+    cycle.system_event_ids = __import__("json").dumps(system_ids, ensure_ascii=False)
+    exact = set(chosen) & set(system_ids)
+    cycle.matched_count = len(exact)
+    cycle.resolved_at = datetime.now(timezone.utc)
+    cycle.status = "resolved"
+    if exact:
+        reward = {1: 30, 2: 45, 3: 70}.get(len(exact), 30)
+        potion_slug = choice(["healing_potion", "house_repair_potion", "mana_crystal"])
+        item = await grant_inventory_item(session, character, potion_slug)
+        await change_gold(session, character, reward, "estate_event_success")
+        cycle.result_kind = "success"
+        cycle.reward_gold = reward
+        cycle.reward_item_slug = potion_slug
+        cycle.result_event_id = next(iter(exact))
+        cycle.result_text = f"Событие предотвращено. Получено {reward} монет и предмет «{item.name}»."
+        return
+    chosen_categories = {str(EVENT_BY_ID[item]["category"]) for item in chosen if item in EVENT_BY_ID}
+    category_matches = [item for item in system_ids if str(EVENT_BY_ID[item]["category"]) in chosen_categories]
+    partial = bool(category_matches)
+    selected = choice(category_matches or system_ids)
+    cycle.result_event_id = selected
+    cycle.result_kind = "partial" if partial else "critical"
+    cycle.result_text = await event_impact(session, character, selected, partial=partial, cycle=cycle)
+
+
+@router.get("/events")
+async def estate_events_center(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    cycle = await current_event_cycle(session, character)
+    chosen = json_list(cycle.chosen_event_ids)
+    system_ids = json_list(cycle.system_event_ids)
+    options_map = json_dict(cycle.daily_options)
+    today = local_date()
+    options: list[str] = []
+    can_choose = cycle.status == "active" and len(chosen) < 3 and cycle.last_choice_date != today
+    if can_choose:
+        options = options_map.get(today, [])
+        if not options:
+            options = event_options(exclude=set(chosen), count=3)
+            options_map[today] = options
+            cycle.daily_options = __import__("json").dumps(options_map, ensure_ascii=False)
+    return {
+        "cycle_id": cycle.id,
+        "status": cycle.status,
+        "tutorial_required": not character.events_tutorial_completed,
+        "day": min(3, len(chosen) + (1 if can_choose else 0)),
+        "chosen": [event_payload(item) for item in chosen if item in EVENT_BY_ID],
+        "options": [event_payload(item) for item in options if item in EVENT_BY_ID],
+        "can_choose": can_choose,
+        "next_choice_text": (
+            "После критического события действует защита владения на 24 часа."
+            if cycle.status == "resolved" and cycle.result_kind == "critical" and _aware(cycle.resolved_at)
+            and datetime.now(timezone.utc) - _aware(cycle.resolved_at) < timedelta(hours=24)
+            else "Следующий выбор будет доступен завтра."
+        ) if not can_choose else None,
+        "system": [event_payload(item) for item in system_ids if item in EVENT_BY_ID],
+        "result": ({
+            "kind": cycle.result_kind,
+            "event": event_payload(cycle.result_event_id) if cycle.result_event_id in EVENT_BY_ID else None,
+            "text": cycle.result_text,
+            "matched_count": cycle.matched_count,
+            "reward_gold": cycle.reward_gold,
+            "reward_item_slug": cycle.reward_item_slug,
+        } if cycle.status == "resolved" else None),
+        "rules": {
+            "success": "Хотя бы одно точное совпадение: 30 монет и зелье. За 2–3 совпадения награда выше.",
+            "partial": "Совпала категория: ущерб события уменьшается вдвое.",
+            "critical": "Нет совпадений: применяется одно критическое последствие.",
+        },
+    }
+
+
+@router.post("/events/choose")
+async def choose_estate_event(
+    payload: EstateEventChooseRequest,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    cycle = await current_event_cycle(session, character)
+    if cycle.status != "active":
+        raise HTTPException(400, "Этот цикл уже завершён.")
+    today = local_date()
+    if cycle.last_choice_date == today:
+        raise HTTPException(400, "Сегодня карточка уже выбрана.")
+    options_map = json_dict(cycle.daily_options)
+    options = options_map.get(today, [])
+    if payload.event_id not in options or payload.event_id not in EVENT_BY_ID:
+        raise HTTPException(400, "Эта карточка сегодня недоступна.")
+    chosen = json_list(cycle.chosen_event_ids)
+    chosen.append(payload.event_id)
+    cycle.chosen_event_ids = __import__("json").dumps(chosen, ensure_ascii=False)
+    cycle.last_choice_date = today
+    if len(chosen) >= 3:
+        await resolve_event_cycle(session, character, cycle)
+        return {"ok": True, "resolved": True, "message": "Три предостережения выбраны. Судьба открыла свои карты."}
+    return {"ok": True, "resolved": False, "message": f"Карточка сохранена. Выбор {len(chosen)}/3."}
+
+
+@router.post("/tutorial/{kind}/complete")
+async def complete_game_tutorial(
+    kind: str,
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    if kind == "farm":
+        character.farm_tutorial_completed = True
+    elif kind == "events":
+        character.events_tutorial_completed = True
+    else:
+        raise HTTPException(404, "Неизвестное обучение.")
+    return {"ok": True}
+
+
+@router.post("/events/result/acknowledge")
+async def acknowledge_event_result(
+    user=Depends(current_miniapp_user),
+    session: AsyncSession=Depends(get_session),
+):
+    character = await require_character(user, session)
+    cycle = await session.scalar(
+        select(EstateEventCycle).where(
+            EstateEventCycle.character_id == character.id,
+            EstateEventCycle.status == "resolved",
+            EstateEventCycle.result_acknowledged.is_(False),
+        ).order_by(EstateEventCycle.id.desc())
+    )
+    if cycle:
+        cycle.result_acknowledged = True
+    return {"ok": True}
 
 
 @router.get("/estate")
@@ -1576,7 +2618,7 @@ async def npc_center(
         ],
         "rules": {
             "guard_time": "Улучшенный стражник сильнее защищает совместный дом.",
-            "fatigue": "При усталости 100 фермер нуждается в отдыхе. Без отдыха он может погибнуть.",
+            "fatigue": "Отдых 2 часа снимает 35 усталости, отдых 4 часа — 60. Во время отдыха смерть от переутомления невозможна.",
         },
     }
 
@@ -1708,7 +2750,9 @@ async def npc_action(
         raise HTTPException(400, "NPC сейчас занят.")
     if available_at and available_at <= now:
         if npc.status == "resting":
-            npc.fatigue = max(0, npc.fatigue - 70)
+            recovery = 60 if npc.assignment == "rest_long" else 35
+            npc.fatigue = max(0, npc.fatigue - recovery)
+            npc.exhaustion_started_at = None
         elif npc.status == "training":
             npc.experience += 20
             npc.skill += 2
@@ -1717,28 +2761,26 @@ async def npc_action(
         npc.assignment = None
         npc.available_at = None
 
+    sync_npc_vitals(npc, now)
     action = payload.action
-    if action == "rest":
+    if action in {"rest", "rest_short", "rest_long"}:
+        long_rest = action == "rest_long"
         npc.status = "resting"
-        npc.assignment = "rest"
-        npc.available_at = now + timedelta(hours=8)
+        npc.assignment = "rest_long" if long_rest else "rest_short"
+        npc.available_at = now + timedelta(hours=4 if long_rest else 2)
         npc.last_rest_at = now
-        return {"ok": True, "message": "NPC отдыхает 8 часов."}
+        npc.exhaustion_started_at = None
+        return {
+            "ok": True,
+            "message": "Глубокий отдых: через 4 часа усталость уменьшится на 60." if long_rest
+                else "Короткий отдых: через 2 часа усталость уменьшится на 35. NPC защищён от смерти во время отдыха.",
+        }
 
     if npc.npc_type == "guard":
-        if action != "school":
-            raise HTTPException(400, "Стражнику доступно обучение в школе.")
-        try:
-            await change_gold(session, character, -10, "guard_school")
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-        npc.status = "training"
-        npc.assignment = "school"
-        npc.available_at = now + timedelta(hours=4)
-        return {"ok": True, "message": "Стражник отправлен в Королевскую школу на 4 часа."}
+        raise HTTPException(400, "Стражнику сейчас доступны отдых, кормление и защита владения.")
 
-    if npc.fatigue >= 90:
-        raise HTTPException(400, "Фермер слишком устал. Сначала отправьте его отдыхать.")
+    if npc.fatigue >= 90 or npc.hunger >= 90:
+        raise HTTPException(400, "Фермер слишком устал или голоден. Сначала дайте ему отдых и еду.")
 
     task_map = {
         "field": (30, 60, "Работа в поле"),
@@ -1751,6 +2793,8 @@ async def npc_action(
 
     fatigue, minutes, label = task_map[action]
     npc.fatigue = min(100, npc.fatigue + fatigue)
+    npc.hunger = min(100, npc.hunger + (10 if action == "field" else 6))
+    sync_npc_vitals(npc, now)
     npc.status = "working"
     npc.assignment = action
     npc.available_at = now + timedelta(minutes=minutes)
@@ -1774,10 +2818,8 @@ async def npc_action(
         apply_levels(character)
         message = "Туалеты очищены. Получен опыт."
 
-    if npc.fatigue >= 100 and randint(1, 100) <= 35:
-        npc.alive = False
-        npc.status = "dead"
-        message += " NPC погиб от истощения."
+    if npc.fatigue >= 100 or npc.hunger >= 100:
+        message += " NPC истощён и больше не сможет работать, пока не отдохнёт и не поест."
     collected = await household_materials(session, member_ids)
     owner_name = next((member.name for member in members if member.id == npc.character_id), None)
     return {"ok": True, "message": message, "unit": await npc_payload(npc, collected, owner_name)}

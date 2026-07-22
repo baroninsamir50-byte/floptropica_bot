@@ -229,6 +229,7 @@ def admin_extended_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Настройки игроков", callback_data="admin:players")],
         [InlineKeyboardButton(text="🖼 Изображения разделов", callback_data="admin:media")],
+        [InlineKeyboardButton(text="🎴 Оформление событий", callback_data="admin:event_media")],
         [
             InlineKeyboardButton(text="🐉 Напасть на дом", callback_data="admin:attack_players"),
             InlineKeyboardButton(text="🏗 Починить все дома", callback_data="admin:repair_all"),
@@ -282,6 +283,8 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         ("🂠 Рубашка карт Таро", "tarot_back"),
         ("🔮 Иконка Таро", "icon_tarot"),
         ("👥 Фон NPC", "npc_bg"),
+        ("🌾 Фон фермы", "farm_bg"),
+        ("🌱 Иконка фермы", "icon_farm"),
         ("👥 Иконка NPC", "icon_npc"),
         ("🚪 Фон комнат", "room_bg"),
         ("🐉 Дракон 1", "enemy_dragon_1"),
@@ -428,6 +431,19 @@ def admin_media_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=label, callback_data=f"adminmedia:{key}")]
         for label, key in media
     ]
+    rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_event_media_keyboard(events: list[dict[str, object]]) -> InlineKeyboardMarkup:
+    rows = []
+    for event in events:
+        number = int(event["number"])
+        title = str(event["title"])
+        rows.append([InlineKeyboardButton(
+            text=f"{number}. {title}",
+            callback_data=f"adminevent:{number}",
+        )])
     rows.append([InlineKeyboardButton(text="⬅ Назад", callback_data="admin:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 

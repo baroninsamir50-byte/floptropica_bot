@@ -16,6 +16,12 @@ const state = {
   tarotOffered: null,
   estate: null,
   npcs: null,
+  farm: null,
+  events: null,
+  farmTimer: null,
+  tutorial: null,
+  tutorialAfter: null,
+  tutorialSession: { farm: false, events: false },
   friends: null,
   friendsLoading: false,
   friendsError: null,
@@ -81,6 +87,150 @@ function formatCountdown(totalSeconds) {
   const secs = seconds % 60;
   return [hours, minutes, secs].map(value => String(value).padStart(2, "0")).join(":");
 }
+
+
+const GAME_TUTORIALS = {
+  farm: [
+    { icon: "🏚", title: "Постройте ферму", text: "Ферма стоит 70 монет. После строительства откроются три грядки и амбар для урожая." },
+    { icon: "🌱", title: "Посадите культуру", text: "Выберите пустую грядку, семена и нажмите «Посадить». Стоимость семян списывается сразу." },
+    { icon: "💧", title: "Ухаживайте за посевами", text: "Без работника вы самостоятельно поливаете растения и собираете созревший урожай." },
+    { icon: "🌾", title: "Назначьте фермера", text: "Один крестьянин или фермер может автоматически обслуживать часть грядок, но получает усталость и голод." },
+    { icon: "🍲", title: "Кормите NPC", text: "Урожай из амбара можно отдавать стражникам и фермерам. Автокормление срабатывает при голоде 70." },
+    { icon: "🛒", title: "Торгуйте урожаем", text: "Выставляйте продукты на торговой площади и назначайте цену для других игроков." }
+  ],
+  events: [
+    { icon: "🎴", title: "Выберите предостережение", text: "Каждый игровой день вам показываются три случайные карточки. Выберите одну угрозу, которую хотите предотвратить." },
+    { icon: "3️⃣", title: "Соберите три карты", text: "За один цикл нужно выбрать три события — по одному в каждый день. Выбранные карты всегда видны в разделе NPC." },
+    { icon: "🔮", title: "Судьба делает выбор", text: "После третьего выбора система автоматически открывает три карты из общей базы событий." },
+    { icon: "🏆", title: "Совпадение приносит награду", text: "Точное совпадение даёт монеты и случайное зелье. Совпадение категории уменьшает последствия вдвое." },
+    { icon: "⚠", title: "Провал имеет последствия", text: "При полном несовпадении активируется одно событие. Итоговая карточка автоматически появится на главном экране." }
+  ]
+};
+
+function tutorialOverlay() {
+  let overlay = document.getElementById("gameTutorialOverlay");
+  if (!overlay) {
+    overlay = document.createElement("div");
+    overlay.id = "gameTutorialOverlay";
+    overlay.className = "game-tutorial-overlay hidden";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    document.body.appendChild(overlay);
+  }
+  return overlay;
+}
+
+function renderGameTutorial() {
+  const tutorial = state.tutorial;
+  const overlay = tutorialOverlay();
+  if (!tutorial) {
+    overlay.classList.add("hidden");
+    overlay.innerHTML = "";
+    return;
+  }
+  const steps = GAME_TUTORIALS[tutorial.kind] || [];
+  const step = steps[tutorial.index] || steps[0];
+  const last = tutorial.index >= steps.length - 1;
+  overlay.innerHTML = `
+    <div class="game-tutorial-card tutorial-${tutorial.kind}">
+      <div class="tutorial-progress">${steps.map((_, index) => `<i class="${index <= tutorial.index ? "active" : ""}"></i>`).join("")}</div>
+      <div class="tutorial-illustration">${step.icon}</div>
+      <div class="eyebrow">ОБУЧЕНИЕ · ${tutorial.index + 1}/${steps.length}</div>
+      <h2>${step.title}</h2>
+      <p>${step.text}</p>
+      <button class="btn gold tutorial-next" onclick="nextGameTutorial()">${last ? "Понятно" : "Далее"}</button>
+      <button class="tutorial-skip" onclick="finishGameTutorial()">Пропустить обучение</button>
+    </div>`;
+  overlay.classList.remove("hidden");
+}
+
+function openGameTutorial(kind, after=null) {
+  state.tutorial = { kind, index: 0 };
+  state.tutorialAfter = after;
+  renderGameTutorial();
+}
+
+window.nextGameTutorial = () => {
+  if (!state.tutorial) return;
+  const steps = GAME_TUTORIALS[state.tutorial.kind] || [];
+  if (state.tutorial.index >= steps.length - 1) {
+    finishGameTutorial();
+    return;
+  }
+  state.tutorial.index += 1;
+  renderGameTutorial();
+};
+
+window.finishGameTutorial = async () => {
+  if (!state.tutorial) return;
+  const kind = state.tutorial.kind;
+  const after = state.tutorialAfter;
+  try {
+    await api(`/tutorial/${kind}/complete`, { method: "POST" });
+    if (kind === "farm" && state.farm) state.farm.tutorial_required = false;
+    if (kind === "events" && state.events) state.events.tutorial_required = false;
+  } catch (error) {
+    toast(error.message);
+  }
+  state.tutorial = null;
+  state.tutorialAfter = null;
+  renderGameTutorial();
+  if (after) await after();
+};
+
+function eventArt(event, className="event-card-art") {
+  if (!event) return `<div class="${className} image-failed"><span>🎴</span></div>`;
+  return `<div class="${className}">
+    <span>${event.icon || "🎴"}</span>
+    <img src="${event.image_url || ""}" alt="${escapeHtml(event.title)}" loading="lazy"
+      onerror="this.remove();this.parentElement.classList.add('image-failed')">
+  </div>`;
+}
+
+function maybeShowPendingEventResult() {
+  const result = state.data?.pending_event_result;
+  if (!result || state.view !== "home" || document.getElementById("eventResultOverlay")) return;
+  const event = result.event || {};
+  const overlay = document.createElement("div");
+  overlay.id = "eventResultOverlay";
+  overlay.className = `event-result-overlay result-${result.kind || "critical"}`;
+  overlay.setAttribute("role", "dialog");
+  overlay.setAttribute("aria-modal", "true");
+  overlay.innerHTML = `
+    <article class="activated-event-card">
+      ${eventArt(event, "activated-event-art")}
+      <div class="activated-event-copy">
+        <div class="eyebrow">${result.kind_label || "ИТОГ СОБЫТИЯ"}</div>
+        <div class="event-number">Событие №${event.number || "?"}</div>
+        <h2>${escapeHtml(event.title || "Событие владения")}</h2>
+        <p class="activated-description">${escapeHtml(event.description || "")}</p>
+        <div class="applied-consequence">
+          <b>${result.kind === "success" ? "Полученная награда" : "Применённые последствия"}</b>
+          <p>${escapeHtml(result.text || "Итог события сохранён.")}</p>
+        </div>
+        ${result.reward_gold ? `<div class="event-reward-line">🪙 +${result.reward_gold} монет</div>` : ""}
+        <button class="btn gold accept-consequence" onclick="acknowledgeEventResult()">ПРИНЯТЬ ПОСЛЕДСТВИЯ</button>
+      </div>
+    </article>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add("visible"));
+}
+
+window.acknowledgeEventResult = async () => {
+  const button = document.querySelector(".accept-consequence");
+  if (button) button.disabled = true;
+  try {
+    await api("/events/result/acknowledge", { method: "POST" });
+    if (state.data) state.data.pending_event_result = null;
+    document.getElementById("eventResultOverlay")?.remove();
+    state.events = null;
+    state.npcs = null;
+    toast("Итог события сохранён");
+  } catch (error) {
+    if (button) button.disabled = false;
+    toast(error.message);
+  }
+};
 
 function startWorkCountdown() {
   clearInterval(state.workTimer);
@@ -229,6 +379,8 @@ function applyActiveScreenBackground() {
     games: "games_bg",
     tarot: "tarot_bg",
     npcs: "npc_bg",
+    farm: "farm_bg",
+    events: "npc_bg",
     inventory: "inventory_bg",
     more: "home_bg"
   };
@@ -442,6 +594,7 @@ function houseView() {
         <button class="btn secondary" onclick="cleanEstate('self')" ${estate.house.cleaning_available ? "" : "disabled"}>🧹 Убраться</button>
         <button class="btn secondary" onclick="cleanEstate('peasant')" ${estate.house.cleaning_available ? "" : "disabled"}>🌾 Фермер</button>
         <button class="btn secondary" onclick="go('npcs')">👥 NPC</button>
+        <button class="btn farm-entry-button" onclick="go('farm')">🌾 Ферма</button>
       </div>
     </div>
 
@@ -817,6 +970,7 @@ function customizationView() {
     duel_frame:'Рамка бойца', duel_vs:'Знак VS', icon_customization:'Иконка кастомизации',
     tarot_bg:'Фон Зала Предсказаний', tarot_back:'Рубашка Таро', icon_tarot:'Иконка Таро',
     npc_bg:'Фон NPC', icon_npc:'Иконка NPC', room_bg:'Фон комнат',
+    farm_bg:'Фон фермы', icon_farm:'Иконка фермы',
     enemy_dragon_1:'Дракон 1',enemy_dragon_2:'Дракон 2',enemy_dragon_3:'Дракон 3',
     enemy_monster_1:'Монстр 1',enemy_monster_2:'Монстр 2',enemy_monster_3:'Монстр 3',
     enemy_anomaly_1:'Аномалия 1',enemy_anomaly_2:'Аномалия 2',enemy_anomaly_3:'Аномалия 3',
@@ -943,6 +1097,10 @@ function customizationView() {
     npc_angel_of_light_2:'Ангел света — облик 2',
     npc_angel_of_light_3:'Ангел света — облик 3'
   };
+
+  for (let number = 1; number <= 20; number += 1) {
+    labels[`event_card_${number}`] = `Карточка события №${number}`;
+  }
 
   const themeCards = Object.entries(labels).map(([key,label]) => {
     const url = state.data.media[key];
@@ -1098,7 +1256,12 @@ window.deleteProfileImage = async kind => {
 };
 
 async function loadNpcs(silent=false){
-  try{state.npcs=await api("/npcs");if(!silent)render()}catch(error){toast(error.message)}
+  try{
+    const [npcs, events] = await Promise.all([api("/npcs"), api("/events")]);
+    state.npcs = npcs;
+    state.events = events;
+    if(!silent) render();
+  }catch(error){toast(error.message)}
 }
 function npcCard(npc){
   const dead=!npc.alive;
@@ -1129,21 +1292,49 @@ function npcCard(npc){
         <span>Сила <b>${stats.strength??0}</b></span><span>Выносливость <b>${stats.endurance??0}</b></span>
         <span>Ловкость <b>${stats.agility??0}</b></span><span>${npc.type==='guard'?'Защита':'Навык'} <b>${stats.skill??0}</b></span>
       </div>
-      <div class="npc-fatigue-compact"><span>Усталость</span><b>${npc.fatigue}/100</b></div>
-      <div class="bar fatigue compact"><i style="width:${npc.fatigue}%"></i></div>
-      <small class="npc-status">${dead?'Погиб':npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`}</small>
+      <div class="npc-vitals-grid">
+        <div><div class="npc-fatigue-compact"><span>Усталость</span><b>${npc.fatigue}/100</b></div><div class="bar fatigue compact"><i style="width:${npc.fatigue}%"></i></div></div>
+        <div><div class="npc-fatigue-compact"><span>Голод</span><b>${npc.hunger??0}/100</b></div><div class="bar hunger compact"><i style="width:${npc.hunger??0}%"></i></div></div>
+      </div>
+      <small class="npc-status condition-${npc.condition?.severity||'normal'}">${dead?'Погиб':npc.condition?.label|| (npc.status==='idle'?'Свободен':`Занят: ${npc.assignment||npc.status}`)}</small>
       ${upgradeContent}
       ${!dead ? (npc.type==='guard'
-        ? `<div class="npc-task-grid one-action"><button class="btn gold" onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button></div>`
+        ? `<div class="npc-task-grid compact-actions"><button onclick="npcAction(${npc.id},'rest_short')">🛏 2 ч</button><button onclick="npcAction(${npc.id},'rest_long')">🌙 4 ч</button></div>`
         : `<div class="npc-task-grid compact-actions">
           <button onclick="npcAction(${npc.id},'field')">🌾 Поле</button>
           <button onclick="npcAction(${npc.id},'clean')">🧹 Уборка</button>
           <button onclick="npcAction(${npc.id},'garden')">🌿 Сад</button>
           <button onclick="npcAction(${npc.id},'toilets')">🚽 Туалеты</button>
-          <button onclick="npcAction(${npc.id},'rest')">🛏 Отдых</button>
+          <button onclick="npcAction(${npc.id},'rest_short')">🛏 Отдых 2 ч</button>
+          <button onclick="npcAction(${npc.id},'rest_long')">🌙 Отдых 4 ч</button>
         </div>`) : ''}
     </div>
   </article>`;
+}
+
+
+function selectedEventsPanel() {
+  const d = state.events;
+  if (!d) return `<div class="panel event-preparation-panel muted">Загружаем выбранные события…</div>`;
+  const selected = Array.from({length: 3}, (_, index) => {
+    const event = d.chosen[index];
+    return event
+      ? `<article class="selected-event-mini">
+          ${eventArt(event, "selected-event-art")}
+          <div><small>День ${index + 1}</small><b>№${event.number} · ${escapeHtml(event.title)}</b><span>${escapeHtml(event.category_label)}</span></div>
+        </article>`
+      : `<article class="selected-event-mini empty"><div class="selected-event-art image-failed"><span>?</span></div><div><small>День ${index + 1}</small><b>Ещё не выбрано</b><span>Свободное предостережение</span></div></article>`;
+  }).join("");
+  const buttonLabel = d.can_choose ? "Выбрать событие дня" : (d.status === "resolved" ? "Посмотреть итог цикла" : "Открыть события");
+  return `<section class="panel event-preparation-panel">
+    <div class="event-preparation-head">
+      <div><div class="eyebrow">ПОДГОТОВКА К СОБЫТИЯМ</div><h3>${d.status === "resolved" ? "Цикл завершён" : `Выбрано ${d.chosen.length}/3`}</h3></div>
+      <div class="cycle-orb small">${d.chosen.length}/3</div>
+    </div>
+    <div class="selected-events-grid">${selected}</div>
+    ${!d.can_choose && d.status === "active" ? `<p class="event-next-choice">${escapeHtml(d.next_choice_text || "Следующий выбор будет доступен позже.")}</p>` : ""}
+    <button class="btn event-entry-button" onclick="go('events')">⚠ ${buttonLabel}</button>
+  </section>`;
 }
 
 function npcsView(){
@@ -1156,11 +1347,12 @@ function npcsView(){
     </div></div>
     ${d.shared_with ? `<div class="panel shared-household-banner">💍 Общие NPC с ${d.shared_with}</div>` : ''}
     ${d.festival?.active ? `<div class="panel festival-card"><div><div class="eyebrow">ФЕСТИВАЛЬ ЛЕТА</div><h3>Бесплатный стражник</h3><p>Награду можно забрать до ${d.festival.ends_at} включительно.</p></div><button class="btn gold" onclick="claimSummerGuard()" ${d.festival.can_claim?'':'disabled'}>${d.festival.claimed?'Получено':'Забрать'}</button></div>` : ''}
+    ${selectedEventsPanel()}
     <div class="npc-shop action-grid">
       <button class="btn gold" onclick="buyNpc('guard')">🛡 Стражник · ${d.prices.guard} 🪙</button>
       <button class="btn gold" onclick="buyNpc('peasant')">🌾 Фермер · ${d.prices.peasant} 🪙</button>
     </div>
-    <div class="panel npc-rules compact-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p></div>
+    <div class="panel npc-rules compact-rules"><p>${d.rules.guard_time}</p><p>${d.rules.fatigue}</p><p>Голод растёт постепенно. При 90/100 NPC прекращает работу, а ферма может кормить его автоматически.</p></div>
     <div class="npc-list">${d.units.map(npcCard).join("")||'<div class="panel muted">У вас пока нет NPC.</div>'}</div>
   `)
 }
@@ -1168,6 +1360,140 @@ window.buyNpc=async npc_type=>{try{await api("/npcs/buy",{method:"POST",body:JSO
 window.npcAction=async(npc_id,action)=>{try{const r=await api("/npcs/action",{method:"POST",body:JSON.stringify({npc_id,action})});toast(r.message);await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
 window.upgradeNpc=async npc_id=>{try{const r=await api("/npcs/upgrade",{method:"POST",body:JSON.stringify({npc_id})});toast(r.message);await refresh();await loadNpcs(true);render()}catch(error){toast(error.message)}};
 window.claimSummerGuard=async()=>{try{const r=await api("/festival/summer-guard",{method:"POST"});toast(r.message);await loadNpcs(true);render()}catch(error){toast(error.message)}};
+
+async function loadFarm(silent=false){
+  try{
+    state.farm = await api("/farm");
+    if (!silent) render();
+    if (state.view === "farm" && state.farm.tutorial_required && !state.tutorialSession.farm) {
+      state.tutorialSession.farm = true;
+      setTimeout(() => openGameTutorial("farm"), 120);
+    }
+  }catch(error){toast(error.message)}
+}
+
+function cropSelect(plotId,crops){
+  return `<select id="farm-crop-${plotId}" class="farm-crop-select">${crops.map(c=>`<option value="${c.slug}">${c.icon} ${c.name} · ${c.seed_price} 🪙</option>`).join('')}</select>`;
+}
+
+function farmPlotCard(plot,crops){
+  if(!plot.crop){
+    return `<article class="farm-plot empty"><div class="plot-number">Грядка ${plot.slot}</div><div class="soil-diamond"><span>＋</span></div>${cropSelect(plot.id,crops)}<button class="btn gold" onclick="plantFarmCrop(${plot.id})">Посадить</button></article>`;
+  }
+  const stageLabels={sprout:'Посажено',needs_water:'Нужен полив',growing:'Растёт',ready:'Урожай готов'};
+  const action=plot.stage==='needs_water'||!plot.watered
+    ? `<button class="btn water" onclick="waterFarmPlot(${plot.id})">💧 Полить</button>`
+    : plot.stage==='ready'
+      ? `<button class="btn gold" onclick="harvestFarmPlot(${plot.id})">🧺 Собрать</button>`
+      : `<div class="farm-countdown">⏳ ${formatCountdown(plot.remaining_seconds)}</div>`;
+  return `<article class="farm-plot stage-${plot.stage}">
+    <div class="plot-number">Грядка ${plot.slot}${plot.auto_managed?' · 🤖':''}</div>
+    <div class="soil-diamond crop-stage"><span>${plot.crop.icon}</span><i></i></div>
+    <h3>${plot.crop.name}</h3><small>${stageLabels[plot.stage]||'Растёт'}</small>${action}
+  </article>`;
+}
+
+function farmView(){
+  if(!state.farm){setTimeout(()=>loadFarm(),0);return section("🌾 Ферма",'<div class="panel">Загружаем ферму…</div>')}
+  const d=state.farm;
+  const art=d.visual_assets||{};
+  const farmBackground=state.data?.media?.farm_bg||art.kenney_scene||'';
+  if(!d.built){
+    return section("🌾 Ферма",`<div class="farm-hero locked" style="background-image:linear-gradient(180deg,rgba(20,12,8,.08),rgba(14,8,18,.88)),url('${farmBackground}')"><div><div class="eyebrow">НОВАЯ ПОСТРОЙКА</div><h2>Средневековая ферма</h2><p>Три грядки, амбар и ручной уход. Назначенный фермер автоматически обслуживает две грядки.</p><button class="btn gold" onclick="buildFarm()">Построить за ${d.price} 🪙</button></div></div><div class="panel asset-note">Оформление: Kenney Isometric Miniature Farm, Medieval Tileset и Farm Assets OpenGameArt.</div>`);
+  }
+  const f=d.farm;
+  const farmerOptions=`<option value="">Обслуживать вручную</option>`+(d.farmers||[]).map(n=>`<option value="${n.id}" ${f.farmer_npc_id===n.id?'selected':''}>${escapeHtml(n.name)} · ур. ${n.level} · голод ${n.hunger}</option>`).join('');
+  const stock=(d.stock||[]).map(item=>`<article class="barn-item"><span>${item.crop.icon}</span><div><b>${item.crop.name}</b><small>${item.quantity} ед. · питание −${item.crop.hunger_restore}</small></div><div class="barn-actions"><button onclick="feedFromFarm('${item.crop_slug}')">🍲</button><button onclick="listFarmCrop('${item.crop_slug}',${item.quantity},${item.crop.base_price})">🪙</button></div></article>`).join('');
+  const market=(d.market||[]).map(item=>`<article class="market-listing"><span>${item.crop.icon}</span><div><b>${item.crop.name} ×${item.quantity}</b><small>${item.seller_name} · ${item.unit_price} 🪙/шт.</small></div>${item.is_mine?'<span class="badge">Ваше</span>':`<button class="btn gold" onclick="buyFarmListing(${item.id})">${item.total_price} 🪙</button>`}</article>`).join('');
+  return section("🌾 Ферма",`
+    <div class="farm-hero" style="background-image:linear-gradient(180deg,rgba(25,14,8,.04),rgba(14,8,18,.82)),url('${farmBackground}')"><div><div class="eyebrow">ИЗОМЕТРИЧЕСКОЕ ВЛАДЕНИЕ</div><h2>Ферма · ур. ${f.level}</h2><p>Амбар ${f.barn_used}/${f.barn_capacity} · грядок ${f.plot_count}</p></div></div>
+    <div class="farm-toolbar panel" style="background-image:linear-gradient(90deg,rgba(20,12,24,.94),rgba(20,12,24,.88)),url('${art.medieval_tiles||mediaUrl('farm_bg')||''}')">
+      <label>Назначенный фермер<select onchange="assignFarmWorker(this.value)">${farmerOptions}</select></label>
+      <label class="toggle-line"><input type="checkbox" ${f.auto_feed?'checked':''} onchange="toggleFarmAutoFeed(this.checked)"> Автокормление при голоде 70</label>
+      <small>${d.assigned_farmer?`${escapeHtml(d.assigned_farmer.name)}: усталость ${d.assigned_farmer.fatigue}, голод ${d.assigned_farmer.hunger}`:'Без фермера все действия выполняет игрок.'}</small>
+    </div>
+    <div class="farm-board">${d.plots.map(p=>farmPlotCard(p,d.crops)).join('')}</div>
+    <div class="farm-props-strip" style="background-image:linear-gradient(90deg,rgba(20,12,24,.18),rgba(20,12,24,.84)),url('${art.farm_props||art.kenney_preview||''}')"><span>🌾 Урожай, еда и фермерские принадлежности</span></div>
+    <h3 class="subheading">🏚 Амбар · ${f.barn_used}/${f.barn_capacity}</h3><div class="barn-list">${stock||'<div class="panel muted">Амбар пуст.</div>'}</div>
+    <h3 class="subheading">🛒 Торговая площадь</h3><div class="market-list">${market||'<div class="panel muted">Объявлений пока нет.</div>'}</div>
+    <button class="btn secondary" onclick="go('house')">← Вернуться во владение</button>`);
+}
+
+window.buildFarm=async()=>{try{const r=await api('/farm/build',{method:'POST'});toast(r.message);await refresh();await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.plantFarmCrop=async plotId=>{const crop_slug=$(`farm-crop-${plotId}`)?.value;try{const r=await api('/farm/plant',{method:'POST',body:JSON.stringify({plot_id:plotId,crop_slug})});toast(r.message);await refresh();await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.waterFarmPlot=async plotId=>{try{const r=await api('/farm/water',{method:'POST',body:JSON.stringify({plot_id:plotId})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.harvestFarmPlot=async plotId=>{try{const r=await api('/farm/harvest',{method:'POST',body:JSON.stringify({plot_id:plotId})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.assignFarmWorker=async value=>{try{const r=await api('/farm/assign',{method:'POST',body:JSON.stringify({npc_id:value?Number(value):null})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.toggleFarmAutoFeed=async enabled=>{try{const r=await api('/farm/auto-feed',{method:'POST',body:JSON.stringify({enabled})});toast(r.message);await loadFarm(true)}catch(e){toast(e.message)}};
+window.feedFromFarm=async crop_slug=>{const npcs=state.farm?.npcs||[];if(!npcs.length){toast('Нет живых NPC для кормления');return}const text=npcs.map(n=>`${n.id}: ${n.name} · голод ${n.hunger}`).join('\n');const value=prompt(`Кого накормить? Введите номер:\n${text}`,String(npcs[0].id));if(!value)return;try{const r=await api('/farm/feed',{method:'POST',body:JSON.stringify({npc_id:Number(value),crop_slug})});toast(r.message);await loadFarm(true);await loadNpcs(true);render()}catch(e){toast(e.message)}};
+window.listFarmCrop=async(crop_slug,maxQty,basePrice)=>{const quantity=Number(prompt(`Количество для продажи (1–${maxQty})`,'1'));if(!quantity)return;const unit_price=Number(prompt(`Цена за единицу (примерно ${Math.max(1,Math.ceil(basePrice/2))}–${basePrice*2})`,String(basePrice)));if(!unit_price)return;try{const r=await api('/farm/market/list',{method:'POST',body:JSON.stringify({crop_slug,quantity,unit_price})});toast(r.message);await loadFarm(true);render()}catch(e){toast(e.message)}};
+window.buyFarmListing=async listing_id=>{try{const r=await api('/farm/market/buy',{method:'POST',body:JSON.stringify({listing_id})});toast(r.message);await refresh();await loadFarm(true);render()}catch(e){toast(e.message)}};
+
+async function loadEvents(silent=false){
+  try{state.events=await api('/events');if(!silent)render()}catch(e){toast(e.message)}
+}
+
+function eventCard(event,selectable=false){
+  return `<article class="estate-event-card category-${event.category}">
+    ${eventArt(event)}
+    <div class="event-copy">
+      <div class="event-card-meta"><span class="badge">№${event.number}</span><span class="badge">${event.category_label}</span></div>
+      <h3>${escapeHtml(event.title)}</h3>
+      <p>${escapeHtml(event.description)}</p>
+      <small><b>Возможное последствие:</b> ${escapeHtml(event.impact)}</small>
+      ${selectable?`<button class="btn gold" onclick="chooseEstateEvent('${event.id}')">Предотвратить</button>`:''}
+    </div>
+  </article>`;
+}
+
+function eventsView(){
+  if(!state.events){setTimeout(()=>loadEvents(),0);return section('⚠ События владения','<div class="panel">Судьба перемешивает карточки…</div>')}
+  const d=state.events;
+  const chosen = Array.from({length:3}, (_, index) => {
+    const event=d.chosen[index];
+    return event
+      ? `<article class="chosen-event-card">${eventArt(event,"chosen-event-art")}<small>День ${index+1}</small><b>№${event.number} · ${escapeHtml(event.title)}</b><span>${escapeHtml(event.category_label)}</span></article>`
+      : `<article class="chosen-event-card empty"><div class="chosen-event-art image-failed"><span>?</span></div><small>День ${index+1}</small><b>Не выбрано</b><span>Карточка появится здесь</span></article>`;
+  }).join('');
+  const result=d.result?`<div class="event-result ${d.result.kind}"><div class="eyebrow">${d.result.kind==='success'?'СОБЫТИЕ ПРЕДОТВРАЩЕНО':d.result.kind==='partial'?'ЧАСТИЧНАЯ ПОДГОТОВКА':'КРИТИЧЕСКОЕ СОБЫТИЕ'}</div>${d.result.event?`<h2>${d.result.event.icon} ${escapeHtml(d.result.event.title)}</h2>`:''}<p>${escapeHtml(d.result.text)}</p>${d.result.reward_gold?`<b>+${d.result.reward_gold} монет</b>`:''}</div>`:'';
+  return section('⚠ События владения',`
+    <div class="event-cycle panel">
+      <div><div class="eyebrow">ЦИКЛ ПРЕДВИДЕНИЯ</div><h2>${d.status==='active'?`Выбор ${Math.min(3,d.chosen.length+1)} из 3`:'Цикл завершён'}</h2><p>По одному предостережению в день. После третьего выбора результат рассчитывается автоматически.</p></div>
+      <div class="cycle-orb">${d.chosen.length}/3</div>
+    </div>
+    <h3 class="subheading">Ваши выбранные события</h3>
+    <div class="chosen-event-gallery">${chosen}</div>
+    ${result}
+    ${d.can_choose?`<h3 class="subheading">Сегодняшние предостережения</h3><div class="event-card-carousel">${d.options.map(e=>eventCard(e,true)).join('')}</div>`:`${d.status==='active'?`<div class="panel muted">${escapeHtml(d.next_choice_text || 'Сегодняшняя карточка уже выбрана.')}</div>`:''}`}
+    ${d.system?.length?`<h3 class="subheading">Карты судьбы последнего цикла</h3><div class="system-event-grid">${d.system.map(e=>`<div>${eventArt(e,"system-event-art")}<small>№${e.number} · ${escapeHtml(e.title)}</small></div>`).join('')}</div>`:''}
+    <details class="panel"><summary>Правила цикла</summary><p>${d.rules.success}</p><p>${d.rules.partial}</p><p>${d.rules.critical}</p></details>
+    <button class="btn secondary" onclick="go('npcs')">← Вернуться к NPC</button>`);
+}
+
+async function performEstateEventChoice(event_id){
+  try{
+    const r=await api('/events/choose',{method:'POST',body:JSON.stringify({event_id})});
+    toast(r.message);
+    state.events=null; state.npcs=null; state.farm=null;
+    if(r.resolved){
+      state.view='home';
+      await refresh();
+      setTimeout(maybeShowPendingEventResult,120);
+      return;
+    }
+    await Promise.all([loadEvents(true),loadNpcs(true)]);
+    render();
+  }catch(e){toast(e.message)}
+}
+
+window.chooseEstateEvent=async event_id=>{
+  if(state.events?.tutorial_required && !state.tutorialSession.events){
+    state.tutorialSession.events=true;
+    openGameTutorial('events',()=>performEstateEventChoice(event_id));
+    return;
+  }
+  await performEstateEventChoice(event_id);
+};
 
 function gamesView() {
   const d=state.duels;
@@ -1684,6 +2010,8 @@ function moreView() {
       ${quick("🚩", "Фракции", "Политические силы", "factions")}
       ${quick("🎲", "Игры", "Арена и экспедиции", "games")}
       ${quick("🔮", "Таро", "Предсказание и карты друзей", "tarot", "icon_tarot")}
+      ${quick("🌾", "Ферма", "Урожай и торговля", "farm", "icon_farm")}
+      ${quick("👥", "NPC", "Слуги и события", "npcs", "icon_npc")}
     </div>`);
 }
 
@@ -1702,6 +2030,8 @@ function render() {
     customization: customizationView,
     tarot: tarotView,
     npcs: npcsView,
+    farm: farmView,
+    events: eventsView,
     friends: friendsView,
     'friend-detail': friendDetailView,
     'friend-story': friendStoryView,
@@ -1721,10 +2051,22 @@ function render() {
   if(state.view==='games' && state.duels?.active){state.duelPoll=setInterval(()=>loadDuelCenter(true),3500);}
   if(state.view==='treasury') startWorkCountdown();
   else { clearInterval(state.workTimer); state.workTimer = null; }
+  clearInterval(state.farmTimer);
+  state.farmTimer = null;
+  if(state.view==='farm') {
+    state.farmTimer = setInterval(async () => {
+      if(state.view !== 'farm') return;
+      await loadFarm(true);
+      if(state.view === 'farm') render();
+    }, 30000);
+  }
 
   document.querySelectorAll(".bottom-nav button").forEach(button => {
     button.classList.toggle("active", button.dataset.view === state.view);
   });
+  if (state.view === "home" && state.data?.pending_event_result) {
+    setTimeout(maybeShowPendingEventResult, 80);
+  }
 }
 
 window.openUpload = openUpload;
@@ -1735,6 +2077,8 @@ window.go = view => {
   if(view==='games') loadDuelCenter(true);
   if(view==='house') loadEstate(true);
   if(view==='npcs') loadNpcs(true);
+  if(view==='farm') loadFarm(true);
+  if(view==='events') loadEvents(true);
   if(view==='friends') loadFriends();
   if(view==='statistics') loadStatistics();
   if(view==='customization' && state.data?.is_admin) loadAdminPlayers();
